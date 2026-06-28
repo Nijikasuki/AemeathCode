@@ -1,0 +1,17 @@
+[project]
+name = "aemeathcode"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+]
+
+# 构建后端:让本项目能被当成一个可安装的包(src 布局)
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# 告诉 hatchling 包的源码在 src/aemeathcode 下
+[tool.hatch.build.targets.wheel]
+packages = ["src/aemeathcode"]
