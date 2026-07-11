@@ -3,6 +3,7 @@ name = "aemeathcode"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic>=0.112.0",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
 ]

@@ -7,6 +7,8 @@ class Config(BaseModel):
     host: str = '127.0.0.1'
     port: int = 9999
     log_level: str = "INFO"
+    model: str
+    max_steps: int
 
 def get_config():
     load_dotenv()
@@ -14,4 +16,6 @@ def get_config():
         host=os.environ.get("AEMEATH_HOST", "127.0.0.1"),
         port=os.environ.get("AEMEATH_PORT", 9999),
         log_level=os.environ.get("AEMEATH_LOG_LEVEL", "INFO"),
+        model=os.environ.get("AEMEATH_LLM_DEFAULT_MODEL"),
+        max_steps=int(os.environ.get("AEMEATH_MAX_STEPS")),
     )
