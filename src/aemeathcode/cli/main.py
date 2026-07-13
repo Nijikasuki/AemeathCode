@@ -3,6 +3,7 @@ import asyncio
 
 from aemeathcode.transport.socket_client import SocketClient
 from aemeathcode.core.app import main as app_main
+from aemeathcode.tui.render import render
 
 async def _ping():
     client = SocketClient("127.0.0.1", 9999)
@@ -20,7 +21,7 @@ async def _run(goal:str):
     done = asyncio.Event()
 
     async def on_event(event):  # 事件处理器
-        print(event)
+        print(render(event))
         if event.get("type") == "run.completed":  # 看到完成 → 举旗
             done.set()
 
@@ -28,7 +29,7 @@ async def _run(goal:str):
     loop_task = asyncio.create_task(client.run_event_loop())
 
     ack = await client.send_command("run", {"goal": goal})
-    print("ack:",ack)
+    print(f"🚀 已启动 (run_id={ack['run_id']})")
 
     await done.wait()  # 盯着旗，等 run.completed
 

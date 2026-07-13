@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime
 from aemeathcode.agent.events.bus import EventBus
 from aemeathcode.agent.events.models import RunFinishedEvent
-from aemeathcode.agent.events.printer import ConsolePrinter
+from aemeathcode.agent.events.printer import EventLogger
 from aemeathcode.agent.events.writer import FileWriter
 from aemeathcode.agent.llm.provider import AnthropicProvider
 from aemeathcode.agent.tools import registry
@@ -21,7 +21,7 @@ class Runner:
         run_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         file_writer = FileWriter(Path(f"/home/administrator/cc_learn/AemeathCode/run/events_{run_time}.ndjson"))
-        printer = ConsolePrinter()
+        printer = EventLogger()
         broadcaster = IpcBroadcaster(writer)
 
         provider = AnthropicProvider(get_config().model)

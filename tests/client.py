@@ -15,9 +15,11 @@ async def main():
     done = asyncio.Event()  # 信号旗
 
     async def on_event(event):  # 事件处理器
-        print(event)  # 土法显示
-        if event.get("type") == "run.completed":  # 看到完成 → 举旗
+        print(event)
+        if event.get("type") == "run.completed":
             done.set()
+        else:
+            print(f"· {event["type"]}")
 
     client.on_event(on_event)
 

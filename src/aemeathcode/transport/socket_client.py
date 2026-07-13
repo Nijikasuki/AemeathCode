@@ -1,6 +1,7 @@
 import asyncio
 import json
 import uuid
+from typing import Any
 
 from aemeathcode.bus.envelope import JsonRpcRequest
 
@@ -20,7 +21,7 @@ class SocketClient:
         self._event_handlers.append(handler)
 
 
-    async def send_command(self,method,params)->str:
+    async def send_command(self,method,params)-> Any:
         req_id = uuid.uuid4().hex
         fut = asyncio.get_running_loop().create_future()
         self._pending[req_id] = fut
