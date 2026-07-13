@@ -22,12 +22,14 @@ class Agent:
         self.messages =  [{"role": "user","content": goal}]
         self.run_id = str(uuid.uuid4())
 
-    async def loop(self) -> str:
+    async def loop(self) -> None:
         await self.bus.publish(RunStartedEvent(goal=self.goal, run_id=self.run_id))
         round_no = 0
         while True:
             if self.max_steps <= 0:
-                return "达到最大轮数"
+                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.run_id, steps=round_no,
+                                                        content="达到最大轮数"))
+                return None
 
             round_no += 1
             resp = await self.provider.chat(messages=self.messages,
@@ -36,8 +38,8 @@ class Agent:
                                             run_id=self.run_id)
 
             if resp.stop_reason == "end_turn":
-                await self.bus.publish(RunFinishedEvent(status="success",run_id=self.run_id,steps=round_no))
-                return resp.text if resp.text is not None else "(模型未返回文本)"
+                await self.bus.publish(RunFinishedEvent(status="success",run_id=self.run_id,steps=round_no,content=resp.text if resp.text is not None else "(模型未返回文本)"))
+                return None
             elif resp.stop_reason == "tool_use":
 
                 blocks = []
@@ -59,9 +61,16 @@ class Agent:
                 self.messages.append({"role": "user", "content": tool_results})
 
             elif resp.stop_reason == "max_tokens":
-                return "回复太长被截断"
+                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.run_id, steps=round_no,
+                                                    content="回复太长被截断"))
+                return None
+
             elif resp.stop_reason == "refusal":
-                return "拒答"
+                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.run_id, steps=round_no,
+                                                    content="拒答"))
+                return None
             else:
-                return "未知错误"
+                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.run_id, steps=round_no,
+                                                        content="未知错误"))
+                return None
             self.max_steps -= 1

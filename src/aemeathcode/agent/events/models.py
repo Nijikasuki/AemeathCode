@@ -28,6 +28,7 @@ class RunFinishedEvent(BaseModel):
     type: Literal["run.completed"] = "run.completed"
     status: str
     steps: int
+    content: str
     ts: str = Field(default_factory=lambda: datetime.now().isoformat())
     run_id: str
 

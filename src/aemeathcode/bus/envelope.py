@@ -23,5 +23,9 @@ class JsonRpcError(BaseModel):
     id: str | None = None
     error: JsonRpcErrorObject
 
+class EventEnvelope(BaseModel):
+    kind :Literal["event"] = "event"
+    event : dict
+
 def make_error(id,code,message):
     return JsonRpcError(id = id,error = JsonRpcErrorObject(code = code,message = message))

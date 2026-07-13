@@ -5,6 +5,7 @@ import logging
 from pydantic import ValidationError
 
 from aemeathcode.bus.envelope import make_error, JsonRpcRequest, JsonRpcSuccess
+from aemeathcode.transport.context import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +68,9 @@ class SocketServer():
             response = make_error(req.id, -32601, "Method not found")
             await self._send(response, writer)
             return
+        ctx = RequestContext(req.params, writer, req.id)
         try:
-            result = await handler(req.params)
+            result = await handler(ctx)
         except Exception as e:
             logger.exception("handler %s crashed",req.method)
             response = make_error(req.id, -32603, "Internal error")

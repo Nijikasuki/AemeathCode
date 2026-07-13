@@ -1,36 +1,26 @@
 import asyncio
-from datetime import datetime
 import logging
 import signal
-from pathlib import Path
-from aemeathcode.agent.events.bus import EventBus
-from aemeathcode.agent.events.printer import ConsolePrinter
-from aemeathcode.agent.events.writer import FileWriter
-from aemeathcode.agent.llm.provider import AnthropicProvider
-from aemeathcode.agent.tools import registry
+
 from aemeathcode.core.config import get_config
 from aemeathcode.core.logging_setup import setup_logging
+from aemeathcode.core.runner import Runner
+from aemeathcode.transport.context import RequestContext
 from aemeathcode.transport.socket_server import SocketServer
-from aemeathcode.agent.loop import Agent
+
 
 logger = logging.getLogger(__name__)
+runner = Runner()
 
-async def ping_handler(params):
+async def ping_handler(ctx:RequestContext)->str:
     return "pong"
 
-async def run_handler(params):
-    goal = params.get("goal")
+async def run_handler(ctx:RequestContext)->dict|str:
+    goal = ctx.params.get("goal")
     if not goal:
         return "错误:缺少 goal 参数"
-    bus = EventBus()
-    run_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    writer = FileWriter(Path(f"/home/administrator/cc_learn/AemeathCode/run/events_{run_time}.ndjson"))
-    printer = ConsolePrinter()
-    provider = AnthropicProvider(get_config().model)
-    agent = Agent(provider=provider,registry=registry,bus=bus,goal=goal)
-    bus.subscribe(writer.write)
-    bus.subscribe(printer.handle)
-    return await agent.loop()
+    run_id = runner.start_run(goal=goal,writer=ctx.writer)
+    return {"run_id": run_id}
 
 async def main():
     config = get_config()
