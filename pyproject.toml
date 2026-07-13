@@ -8,6 +8,10 @@ dependencies = [
     "python-dotenv>=1.2.2",
 ]
 
+# 命令行入口:装包后生成 `aemeath` 命令,指向 cli/main.py 的 main()
+[project.scripts]
+aemeath = "aemeathcode.cli.main:main"
+
 # 构建后端:让本项目能被当成一个可安装的包(src 布局)
 [build-system]
 requires = ["hatchling"]
