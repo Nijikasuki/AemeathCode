@@ -1,44 +1,40 @@
-import uuid
 
 from aemeathcode.agent.events.bus import EventBus
 from aemeathcode.agent.events.models import RunStartedEvent, RunFinishedEvent
 from aemeathcode.agent.llm.base import LLMProvider
 from aemeathcode.agent.tools import ToolRegistry
 from aemeathcode.agent.tools.invocation import invoke_tool
-from aemeathcode.core.config import get_config
+from aemeathcode.core.context import ExecutionContext
 
 class Agent:
     def __init__(self,
+                 ctx: ExecutionContext,
                  provider: LLMProvider,
                  registry: ToolRegistry,
-                 bus: EventBus,
-                 goal:str):
-        config = get_config()
+                 bus: EventBus):
         self.provider = provider
         self.registry = registry
         self.bus = bus
-        self.max_steps = config.max_steps
-        self.goal = goal
-        self.messages =  [{"role": "user","content": goal}]
-        self.run_id = str(uuid.uuid4())
+        self.ctx = ctx
 
     async def loop(self) -> None:
-        await self.bus.publish(RunStartedEvent(goal=self.goal, run_id=self.run_id))
-        round_no = 0
+        await self.bus.publish(RunStartedEvent(goal=self.ctx.goal, run_id=self.ctx.run_id))
+
         while True:
-            if self.max_steps <= 0:
-                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.run_id, steps=round_no,
+            if self.ctx.max_steps <= 0:
+                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.ctx.run_id, steps=self.ctx.step,
                                                         content="达到最大轮数"))
                 return None
 
-            round_no += 1
-            resp = await self.provider.chat(messages=self.messages,
+            self.ctx.step+=1
+            resp = await self.provider.chat(messages=self.ctx.messages,
                                             tool_schemas=self.registry.tool_schemas(),
                                             bus=self.bus,
-                                            run_id=self.run_id)
+                                            run_id=self.ctx.run_id)
 
             if resp.stop_reason == "end_turn":
-                await self.bus.publish(RunFinishedEvent(status="success",run_id=self.run_id,steps=round_no,content=resp.text if resp.text is not None else "(模型未返回文本)"))
+                await self.bus.publish(RunFinishedEvent(status="success",run_id=self.ctx.run_id,steps=self.ctx.step,content=resp.text if resp.text is not None else "(模型未返回文本)"))
+                self.ctx.mark_success()
                 return None
             elif resp.stop_reason == "tool_use":
 
@@ -48,29 +44,32 @@ class Agent:
                 for tc in resp.tool_calls:
                     blocks.append({"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input})
 
-                self.messages.append({"role":"assistant","content":blocks})
+                self.ctx.add_assistant_message(content=blocks)
 
                 tool_results = []
                 for tc in resp.tool_calls:
-                    result = await invoke_tool(registry=self.registry,tool_call=tc,bus=self.bus,run_id=self.run_id)
+                    result = await invoke_tool(registry=self.registry,tool_call=tc,bus=self.bus,run_id=self.ctx.run_id)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tc.id,
                         "content": result.content,  # ToolResult 的 .content
                     })
-                self.messages.append({"role": "user", "content": tool_results})
+                self.ctx.add_tool_results(tool_result=tool_results)
 
             elif resp.stop_reason == "max_tokens":
-                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.run_id, steps=round_no,
+                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.ctx.run_id, steps=self.ctx.step,
                                                     content="回复太长被截断"))
+                self.ctx.mark_failed("回复太长被截断")
                 return None
 
             elif resp.stop_reason == "refusal":
-                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.run_id, steps=round_no,
+                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.ctx.run_id, steps=self.ctx.step,
                                                     content="拒答"))
+                self.ctx.mark_failed("拒答")
                 return None
             else:
-                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.run_id, steps=round_no,
+                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.ctx.run_id, steps=self.ctx.step,
                                                         content="未知错误"))
+                self.ctx.mark_failed("未知错误")
                 return None
-            self.max_steps -= 1
+            self.ctx.max_steps -= 1
