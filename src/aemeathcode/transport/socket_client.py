@@ -5,6 +5,12 @@ from typing import Any
 
 from aemeathcode.bus.envelope import JsonRpcRequest
 
+class IpcError(Exception):
+    def __init__(self, code:int, message:str):
+        super().__init__(f"[{code}] {message}")
+        self.code = code
+        self.message = message
+
 
 class SocketClient:
     def __init__(self, host:str, port:int):
@@ -15,11 +21,12 @@ class SocketClient:
         self._pending = {}
 
     async def connect(self):
-        self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
+        self._reader, self._writer = await asyncio.open_connection(
+            self.host, self.port, limit=1024 * 1024
+        )
 
     def on_event(self, handler):
         self._event_handlers.append(handler)
-
 
     async def send_command(self,method,params)-> Any:
         req_id = uuid.uuid4().hex
@@ -31,11 +38,17 @@ class SocketClient:
 
 
     async def run_event_loop(self):
-        while True:
-            line = await self._reader.readline()
-            if not line:
-                break
-            await self._dispatch(line)
+        try:
+            while True:
+                line = await self._reader.readline()
+                if not line:
+                    break
+                await self._dispatch(line)
+        finally:
+            for fut in self._pending.values():
+                if not fut.done():
+                    fut.set_exception(ConnectionError("连接已断开"))
+            self._pending.clear()
 
     async def close(self):
         self._writer.close()
@@ -51,8 +64,10 @@ class SocketClient:
             req_id = msg["id"]
             fut = self._pending.pop(req_id,None)
             if fut and not fut.done():
-                fut.set_result(msg.get("result"))
-
+                if "error" in msg:
+                    fut.set_exception(IpcError(msg["error"]["code"],msg["error"]["message"]))
+                else:
+                    fut.set_result(msg.get("result"))
 
 
 

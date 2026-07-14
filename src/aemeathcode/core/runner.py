@@ -9,26 +9,24 @@ from aemeathcode.agent.events.writer import FileWriter
 from aemeathcode.agent.llm.provider import AnthropicProvider
 from aemeathcode.agent.tools import registry
 from aemeathcode.core.config import get_config
-from aemeathcode.transport.ipc_broadcaster import IpcBroadcaster
 from aemeathcode.agent.loop import Agent
 
 class Runner:
-    def __init__(self):
+    def __init__(self,broadcaster):
         self._tasks: set[asyncio.Task] = set()
-
-    def start_run(self,goal:str,writer)->str:
+        self._broadcaster = broadcaster
+    def start_run(self,goal:str)->str:
         bus = EventBus()
         run_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         file_writer = FileWriter(Path(f"/home/administrator/cc_learn/AemeathCode/run/events_{run_time}.ndjson"))
         printer = EventLogger()
-        broadcaster = IpcBroadcaster(writer)
 
         provider = AnthropicProvider(get_config().model)
         agent = Agent(provider=provider, registry=registry, bus=bus, goal=goal)
         bus.subscribe(file_writer.write)
         bus.subscribe(printer.handle)
-        bus.subscribe(broadcaster.broadcast)
+        bus.subscribe(self._broadcaster.handle)
 
         task = asyncio.create_task(self._run_guarded(agent, bus))
         self._tasks.add(task)

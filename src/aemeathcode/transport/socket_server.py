@@ -9,13 +9,13 @@ from aemeathcode.transport.context import RequestContext
 
 logger = logging.getLogger(__name__)
 
-class SocketServer():
-    def __init__(self,host:str,port:int):
+class SocketServer:
+    def __init__(self,host:str,port:int,broadcaster):
         self.host = host
         self.port = port
         self._handlers = {}
         self._server = None
-
+        self._broadcaster = broadcaster
     def register(self,method:str,handler):
         self._handlers[method] = handler
 
@@ -46,6 +46,7 @@ class SocketServer():
                     break
                 await self._handle_line(line, writer)
         finally:
+            self._broadcaster.unsubscribe(writer)
             writer.close()
             await writer.wait_closed()
 

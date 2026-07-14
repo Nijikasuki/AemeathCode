@@ -1,14 +1,44 @@
 from asyncio import StreamWriter
-
-from pydantic import BaseModel
+from dataclasses import dataclass
 
 from aemeathcode.bus.envelope import EventEnvelope
 
+@dataclass
+class Subscriber:
+    writer: StreamWriter
+    scope: str
 
-class IpcBroadcaster:
-    def __init__(self, writer:StreamWriter):
-        self.writer = writer
-    async def broadcast(self, event:BaseModel):
-        run_event = EventEnvelope(event=event.model_dump())
-        self.writer.write(run_event.model_dump_json().encode() + b"\n")
-        await self.writer.drain()
+class IpcEventBroadcaster:
+    def __init__(self):
+        self._subscribers = []
+
+    def subscribe(self, subscriber:Subscriber):
+        self._subscribers.append(subscriber)
+
+    def unsubscribe(self, writer:StreamWriter):
+        for subscriber in self._subscribers:
+            if subscriber.writer is writer:
+                self._subscribers.remove(subscriber)
+                break
+
+    def _match(self, run_id, scope) -> bool:
+        if scope == "global":
+            return True
+        if scope.startswith("run:"):
+            return scope[4:] == run_id  # 抠出 "run:" 后面的 id,精确比
+        return False
+
+    async def handle(self,event):
+        data = EventEnvelope(event=event.model_dump()).model_dump_json().encode() + b"\n"
+        run_id = event.run_id
+        dead = []
+        for subscriber in list(self._subscribers):
+            if not self._match(run_id, subscriber.scope):  # ← 不匹配就跳过
+                continue
+            try:
+                subscriber.writer.write(data)
+                await subscriber.writer.drain()
+            except (ConnectionResetError, BrokenPipeError,OSError):
+                dead.append(subscriber.writer)
+        for writer in dead:
+            self.unsubscribe(writer)

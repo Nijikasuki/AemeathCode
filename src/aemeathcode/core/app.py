@@ -7,10 +7,11 @@ from aemeathcode.core.logging_setup import setup_logging
 from aemeathcode.core.runner import Runner
 from aemeathcode.transport.context import RequestContext
 from aemeathcode.transport.socket_server import SocketServer
-
+from aemeathcode.transport.ipc_broadcaster import IpcEventBroadcaster,Subscriber
 
 logger = logging.getLogger(__name__)
-runner = Runner()
+broadcaster = IpcEventBroadcaster()
+runner = Runner(broadcaster)
 
 async def ping_handler(ctx:RequestContext)->str:
     return "pong"
@@ -19,13 +20,14 @@ async def run_handler(ctx:RequestContext)->dict|str:
     goal = ctx.params.get("goal")
     if not goal:
         return "错误:缺少 goal 参数"
-    run_id = runner.start_run(goal=goal,writer=ctx.writer)
+    run_id = runner.start_run(goal=goal)
+    broadcaster.subscribe(Subscriber(ctx.writer,f"run:{run_id}"))
     return {"run_id": run_id}
 
 async def main():
     config = get_config()
     setup_logging(config)
-    server = SocketServer(host=config.host,port=config.port)
+    server = SocketServer(host=config.host,port=config.port,broadcaster=broadcaster)
     server.register("ping",ping_handler)
     server.register("run",run_handler)
 
