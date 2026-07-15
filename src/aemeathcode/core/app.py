@@ -21,15 +21,22 @@ async def run_handler(ctx:RequestContext)->dict|str:
     if not goal:
         return "错误:缺少 goal 参数"
     run_id = runner.start_run(goal=goal)
-    broadcaster.subscribe(Subscriber(ctx.writer,f"run:{run_id}"))
+    broadcaster.subscribe(Subscriber(writer = ctx.writer,scope=f"run:{run_id}",topics=["*"]))
     return {"run_id": run_id}
+
+async def watch_handler(ctx:RequestContext)->dict:
+    scope = ctx.params.get("scope", "global")
+    topics = ctx.params.get("topics", ["*"])
+    broadcaster.subscribe(Subscriber(writer=ctx.writer,scope=scope,topics=topics))
+    return {"subscribed": scope}
 
 async def main():
     config = get_config()
     setup_logging(config)
     server = SocketServer(host=config.host,port=config.port,broadcaster=broadcaster)
-    server.register("ping",ping_handler)
-    server.register("run",run_handler)
+    server.register(method="ping",handler=ping_handler)
+    server.register(method="run",handler=run_handler)
+    server.register(method="watch",handler=watch_handler)
 
     addr = await server.start()
     logger.info("listening on %s", addr)

@@ -36,6 +36,16 @@ async def _run(goal:str):
     loop_task.cancel()  # 收工：停分拣室
     await client.close()
 
+async def _watch(scope:str, topics:list[str]):
+    client = SocketClient("127.0.0.1", 9999)
+    await client.connect()
+    async def on_event(event):
+        print(render(event))
+    client.on_event(on_event)
+    loop_task = asyncio.create_task(client.run_event_loop())
+    ack = await client.send_command("watch", {"scope": scope, "topics": topics})
+    print(f"观察模式已启动,scope={ack["subscribed"]}")
+    await loop_task
 
 def cmd_ping(args):
     asyncio.run(_ping())
@@ -46,6 +56,8 @@ def cmd_core(args):
 def cmd_run(args):
     asyncio.run(_run(args.goal))
 
+def cmd_watch(args):
+    asyncio.run(_watch(args.scope, args.topics))
 
 def main():
     parser = argparse.ArgumentParser(prog='aemeath')
@@ -60,6 +72,11 @@ def main():
 
     p_ping = subparsers.add_parser("ping")
     p_ping.set_defaults(func=cmd_ping)
+
+    p_watch = subparsers.add_parser('watch')
+    p_watch.add_argument("--scope", default="global")
+    p_watch.add_argument("--topics", default=["*"])
+    p_watch.set_defaults(func=cmd_watch)
 
     args = parser.parse_args()
     args.func(args)
