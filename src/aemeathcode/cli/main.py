@@ -3,7 +3,8 @@ import asyncio
 
 from aemeathcode.transport.socket_client import SocketClient
 from aemeathcode.core.app import main as app_main
-from aemeathcode.tui.render import render
+from aemeathcode.tui.stream_renderer import StreamRenderer
+
 
 async def _ping():
     client = SocketClient("127.0.0.1", 9999)
@@ -19,10 +20,11 @@ async def _run(goal:str):
     await client.connect()
 
     done = asyncio.Event()
+    renderer = StreamRenderer()
 
     async def on_event(event):  # 事件处理器
-        print(render(event))
-        if event.get("type") == "run.completed":  # 看到完成 → 举旗
+        renderer.feed(event)
+        if event.get("type") == "run.completed":
             done.set()
 
     client.on_event(on_event)
@@ -39,8 +41,11 @@ async def _run(goal:str):
 async def _watch(scope:str, topics:list[str]):
     client = SocketClient("127.0.0.1", 9999)
     await client.connect()
+    renderer = StreamRenderer()
+
     async def on_event(event):
-        print(render(event))
+        renderer.feed(event)
+
     client.on_event(on_event)
     loop_task = asyncio.create_task(client.run_event_loop())
     ack = await client.send_command("watch", {"scope": scope, "topics": topics})

@@ -45,5 +45,6 @@ class Runner:
         try:
             await agent.loop()
         except Exception as e:
-            await bus.publish(RunFinishedEvent(status="error", run_id=agent.ctx.run_id, steps=0,content=f"错误:{e}"))
+            await bus.publish(RunFinishedEvent(status="error", run_id=agent.ctx.run_id, steps=0,content=f"错误:{e}",
+                                               input_tokens=agent.ctx.total_input_tokens,output_tokens=agent.ctx.total_output_tokens,cache_read=agent.ctx.total_cache_read))
 

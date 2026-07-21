@@ -22,8 +22,8 @@ class Agent:
 
         while True:
             if self.ctx.max_steps <= 0:
-                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.ctx.run_id, steps=self.ctx.step,
-                                                        content="达到最大轮数"))
+                await self.bus.publish(RunFinishedEvent(status="error", run_id=self.ctx.run_id, steps=self.ctx.step,content="达到最大轮数",
+                                                        input_tokens=self.ctx.total_input_tokens,output_tokens=self.ctx.total_output_tokens,cache_read=self.ctx.total_cache_read))
                 return None
 
             self.ctx.step+=1
@@ -32,8 +32,11 @@ class Agent:
                                             bus=self.bus,
                                             run_id=self.ctx.run_id)
 
+            self.ctx.token_add(resp)
+
             if resp.stop_reason == "end_turn":
-                await self.bus.publish(RunFinishedEvent(status="success",run_id=self.ctx.run_id,steps=self.ctx.step,content=resp.text if resp.text is not None else "(模型未返回文本)"))
+                await self.bus.publish(RunFinishedEvent(status="success",run_id=self.ctx.run_id,steps=self.ctx.step,content=resp.text if resp.text is not None else "(模型未返回文本)",
+                                                        input_tokens=self.ctx.total_input_tokens,output_tokens=self.ctx.total_output_tokens,cache_read=self.ctx.total_cache_read))
                 self.ctx.mark_success()
                 return None
             elif resp.stop_reason == "tool_use":
@@ -58,18 +61,18 @@ class Agent:
 
             elif resp.stop_reason == "max_tokens":
                 await self.bus.publish(RunFinishedEvent(status="error", run_id=self.ctx.run_id, steps=self.ctx.step,
-                                                    content="回复太长被截断"))
+                                                    content="回复太长被截断",input_tokens=self.ctx.total_input_tokens,output_tokens=self.ctx.total_output_tokens,cache_read=self.ctx.total_cache_read))
                 self.ctx.mark_failed("回复太长被截断")
                 return None
 
             elif resp.stop_reason == "refusal":
                 await self.bus.publish(RunFinishedEvent(status="error", run_id=self.ctx.run_id, steps=self.ctx.step,
-                                                    content="拒答"))
+                                                    content="拒答",input_tokens=self.ctx.total_input_tokens,output_tokens=self.ctx.total_output_tokens,cache_read=self.ctx.total_cache_read))
                 self.ctx.mark_failed("拒答")
                 return None
             else:
                 await self.bus.publish(RunFinishedEvent(status="error", run_id=self.ctx.run_id, steps=self.ctx.step,
-                                                        content="未知错误"))
+                                                        content="未知错误",input_tokens=self.ctx.total_input_tokens,output_tokens=self.ctx.total_output_tokens,cache_read=self.ctx.total_cache_read))
                 self.ctx.mark_failed("未知错误")
                 return None
             self.ctx.max_steps -= 1

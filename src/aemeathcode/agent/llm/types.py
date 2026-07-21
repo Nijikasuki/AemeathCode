@@ -10,6 +10,8 @@ class ToolCallBlock:
 class UsageStats:
     input_tokens:int
     output_tokens:int
+    cache_creation_input_tokens:int
+    cache_read_input_tokens:int
 
 @dataclass
 class LlmResponse:

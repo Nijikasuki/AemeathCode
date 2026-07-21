@@ -1,5 +1,7 @@
 from dataclasses import dataclass,field
 
+from aemeathcode.agent.llm.types import LlmResponse
+
 
 @dataclass
 class ExecutionContext:
@@ -9,6 +11,9 @@ class ExecutionContext:
     reason: str|None = None
     status: str = "running"
     step :int = 0
+    total_input_tokens :int = 0
+    total_output_tokens :int = 0
+    total_cache_read :int = 0
     messages: list[dict] = field(default_factory=list)
 
     def __post_init__(self):
@@ -30,3 +35,9 @@ class ExecutionContext:
 
     def is_done(self):
         return self.status != "running"
+
+    def token_add(self,resp:LlmResponse):
+        if resp.usage is not None:
+            self.total_input_tokens += resp.usage.input_tokens
+            self.total_output_tokens += resp.usage.output_tokens
+            self.total_cache_read += resp.usage.cache_read_input_tokens

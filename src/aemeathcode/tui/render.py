@@ -8,8 +8,6 @@ def render(event: dict) -> str:      # 只 return 字符串,不 print
     prefix = f"[{tag}] "
     if event["type"] == "run.started":
         return f"\n{prefix}🎯 目标: {event['goal']}"
-    elif event["type"] == "thinking":
-        return f"{prefix}🧠 思考: {_short(event["content"])}"
     elif event["type"] == "tool.call_started":
         return f"{prefix}🔧 调用 {event["tool_name"]}  参数={event["params"]}"
     elif event["type"] == "tool.call_finished":
@@ -17,6 +15,6 @@ def render(event: dict) -> str:      # 只 return 字符串,不 print
         return f"{prefix}{icon} 结果: {_short(event['content'])}"
     elif event["type"] == "run.completed":
         icon = "✅" if event["status"] == "success" else "⚠️"
-        return f"{prefix}{icon} 完成 (状态={event['status']}, 步数={event['steps']})\n\n{event['content']}"
+        return f"{prefix}{icon} 完成 (状态={event['status']}, 步数={event['steps']}, input_tokens={event['input_tokens']}, output_tokens={event['output_tokens']}, cache_read={event['cache_read']})"
     else:
         return f"· {prefix}{event["type"]}"

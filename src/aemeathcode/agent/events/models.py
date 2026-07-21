@@ -31,9 +31,18 @@ class RunFinishedEvent(BaseModel):
     content: str
     ts: str = Field(default_factory=lambda: datetime.now().isoformat())
     run_id: str
+    input_tokens:int = 0
+    output_tokens:int = 0
+    cache_read:int = 0
 
 class ThinkingEvent(BaseModel):
-    type: Literal["thinking"] = "thinking"
+    type: Literal["llm.thinking"] = "llm.thinking"
+    content: str
+    ts: str = Field(default_factory=lambda: datetime.now().isoformat())
+    run_id: str
+
+class LlmTokenEvent(BaseModel):
+    type: Literal["llm.token"] = "llm.token"
     content: str
     ts: str = Field(default_factory=lambda: datetime.now().isoformat())
     run_id: str
