@@ -1,5 +1,5 @@
-# tui/stream_renderer.py
-from aemeathcode.tui.render import render
+# cli/stream_renderer.py
+from aemeathcode.cli.render import render
 
 STREAM_TYPES = {"llm.thinking", "llm.token"}
 

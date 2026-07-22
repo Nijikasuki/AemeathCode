@@ -1,34 +1,20 @@
-def _short(text: str, limit: int = 150) -> str:
-    """把多行/超长内容压成一行、截断,便于终端阅读。"""
-    text = text.replace("\n", " ").strip()
-    return text if len(text) <= limit else text[:limit] + "…"
+"""TUI 前端的渲染:事件 → 带 Rich 行内标记的一行。
 
-def render(event: dict) -> str:      # 只 return 字符串,不 print
-    tag = event["run_id"][:8]          # 取前 8 位当短标签
-    prefix = f"[{tag}] "
-    if event["type"] == "run.started":
-        return f"\n{prefix}🎯 目标: {event['goal']}"
-    elif event["type"] == "tool.call_started":
-        return f"{prefix}🔧 调用 {event["tool_name"]}  参数={event["params"]}"
-    elif event["type"] == "tool.call_finished":
-        icon = "❌" if event["is_error"] else "📄"
-        return f"{prefix}{icon} 结果: {_short(event['content'])}"
-    elif event["type"] == "run.completed":
-        icon = "✅" if event["status"] == "success" else "⚠️"
-        return f"{prefix}{icon} 完成 (状态={event['status']}, 步数={event['steps']}, input_tokens={event['input_tokens']}, output_tokens={event['output_tokens']}, cache_read={event['cache_read']})"
-    else:
-        return f"· {prefix}{event["type"]}"
+和 CLI 的 render() 是同一份事件的两种呈现:
+  * CLI 用裸 print,不认识标记 → cli/render.py 出纯文本
+  * TUI 的 Static 会解析标记   → 这里出富标记,同一行内可逐词着色
+
+注:tool.* 事件由 ToolCallBlock 单独渲染,流式事件由 LLMStreamBlock 处理,
+都不走这里。
+"""
 
 
 def event_markup(event: dict) -> str:
-    """TUI 版:带 Rich 行内标记,同一行内可以逐词着色。
-
-    CLI 走上面的 render()(纯文本),TUI 走这个 —— 同一份事件,两种呈现。
-    tool.* 事件由 ToolCallBlock 单独渲染,不走这里。
-    """
     etype = event.get("type", "")
+
     if etype == "run.started":
         return f"[dim]目标[/dim]  [bold]{event.get('goal', '')}[/bold]"
+
     if etype == "run.completed":
         ok = event.get("status") == "success"
         color, icon = ("$success", "✓") if ok else ("$error", "✗")
@@ -37,4 +23,6 @@ def event_markup(event: dict) -> str:
             f"  [dim]{event.get('steps', 0)} 步 · in {event.get('input_tokens', 0)}"
             f" · cache {event.get('cache_read', 0)} · out {event.get('output_tokens', 0)}[/dim]"
         )
-    return render(event)   # 兜底:复用纯文本渲染
+
+    # 兜底:没专门排版的事件类型,暗色显示一下类型名即可
+    return f"[dim]{etype}[/dim]"

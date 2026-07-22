@@ -3,7 +3,7 @@ import asyncio
 
 from aemeathcode.transport.socket_client import SocketClient
 from aemeathcode.core.app import main as app_main
-from aemeathcode.tui.stream_renderer import StreamRenderer
+from aemeathcode.cli.stream_renderer import StreamRenderer
 
 
 async def _ping():
