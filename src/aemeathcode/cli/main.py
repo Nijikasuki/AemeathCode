@@ -64,9 +64,16 @@ def cmd_run(args):
 def cmd_watch(args):
     asyncio.run(_watch(args.scope, args.topics))
 
+def cmd_tui(args):
+    # 延迟导入:只有真进 TUI 才加载 textual,别的子命令不受影响
+    from aemeathcode.tui.app import run as run_tui
+    run_tui()
+
 def main():
     parser = argparse.ArgumentParser(prog='aemeath')
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    # 不传子命令时默认进 TUI(类似 claude code:敲 aemeath 直接进界面)
+    parser.set_defaults(func=cmd_tui)
+    subparsers = parser.add_subparsers(dest="command")
 
     p_core = subparsers.add_parser('core')
     p_core.set_defaults(func=cmd_core)
@@ -82,6 +89,9 @@ def main():
     p_watch.add_argument("--scope", default="global")
     p_watch.add_argument("--topics", default=["*"])
     p_watch.set_defaults(func=cmd_watch)
+
+    p_tui = subparsers.add_parser('tui')     # 显式写法,和裸 aemeath 等价
+    p_tui.set_defaults(func=cmd_tui)
 
     args = parser.parse_args()
     args.func(args)

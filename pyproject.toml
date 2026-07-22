@@ -6,6 +6,7 @@ dependencies = [
     "anthropic>=0.112.0",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
+    "textual>=8.2.8",
 ]
 
 # 命令行入口:装包后生成 `aemeath` 命令,指向 cli/main.py 的 main()
