@@ -21,7 +21,7 @@ class WriteFileTool(BaseTool):
         "required": ["path", "content"]
     }
 
-    async def invoke(self, param) -> ToolResult:
+    async def invoke(self, param,ctx) -> ToolResult:
         try:
             cwd = Path.cwd()
 

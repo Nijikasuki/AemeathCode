@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from aemeathcode.core.context import ExecutionContext
 
 @dataclass
 class ToolResult:
@@ -14,5 +15,5 @@ class BaseTool(ABC):
     input_schema:dict
 
     @abstractmethod
-    async def invoke(self, params) -> ToolResult:
+    async def invoke(self, params,ctx:ExecutionContext) -> ToolResult:
         pass

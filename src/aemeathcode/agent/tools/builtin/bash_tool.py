@@ -17,7 +17,7 @@ class BashTool(BaseTool):
     }
 
 
-    async def invoke(self, param) -> ToolResult:
+    async def invoke(self, param,ctx) -> ToolResult:
         try:
             command = param["command"]
 

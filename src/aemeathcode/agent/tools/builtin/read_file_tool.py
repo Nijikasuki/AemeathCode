@@ -15,7 +15,7 @@ class ReadFileTool(BaseTool):
         "required": ["path"]
     }
     max_size = 1024*1024
-    async def invoke(self, param) -> ToolResult:
+    async def invoke(self, param,ctx) -> ToolResult:
         try:
             path = param["path"]
             file_path = Path(path)

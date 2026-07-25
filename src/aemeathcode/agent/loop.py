@@ -51,11 +51,12 @@ class Agent:
 
                 tool_results = []
                 for tc in resp.tool_calls:
-                    result = await invoke_tool(registry=self.registry,tool_call=tc,bus=self.bus,run_id=self.ctx.run_id)
+                    result = await invoke_tool(registry=self.registry,tool_call=tc,bus=self.bus,ctx=self.ctx)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tc.id,
                         "content": result.content,  # ToolResult 的 .content
+                        "is_error": result.is_error,
                     })
                 self.ctx.add_tool_results(tool_result=tool_results)
 
