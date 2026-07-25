@@ -23,7 +23,7 @@ class AnthropicProvider(LLMProvider):
                                                         "text": SYSTEM_PROMPT,
                                                         "cache_control": {"type": "ephemeral"},}],
                                                 model=self.model,
-                                                max_tokens=1024,
+                                                max_tokens=8192,
                                                 tools=tool_schemas,
                                                 messages=messages) as stream:
             async for event in stream:
