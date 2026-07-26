@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+from datetime import datetime
+from pathlib import Path
 
 from aemeathcode.transport.socket_client import SocketClient
 from aemeathcode.core.app import main as app_main
@@ -69,6 +71,48 @@ def cmd_tui(args):
     from aemeathcode.tui.app import run as run_tui
     run_tui()
 
+def cmd_trace(args):
+    # trace 不连 daemon,纯读本地文件,所以是同步的,不用 asyncio.run
+    from aemeathcode.core.trace.record import TraceRecord
+
+    run_dir = Path("run")  # 约定从项目根目录运行
+    files = sorted(run_dir.glob("traces_*.ndjson"))  # 文件名带时间戳,字典序=时间序
+    if not files:
+        print("还没有 trace 文件(先跑一个 aemeath run)")
+        return
+    path = files[-1]  # 最新那个
+
+    records = [
+        TraceRecord.model_validate_json(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if not records:
+        print(f"{path.name} 是空的")
+        return
+
+    print(f"Trace: run {records[0].run_id[:8]}  ({path.name})\n")
+
+    t0 = datetime.fromisoformat(records[0].ts)
+    llm_total = tool_total = 0.0
+    llm_n = tool_n = 0
+    for r in records:
+        rel_ms = (datetime.fromisoformat(r.ts) - t0).total_seconds() * 1000
+        mark = "✗" if r.status == "error" else " "
+        print(f"  {mark} +{rel_ms:>7.0f}ms  {r.category:<4}  {r.name:<24}  {r.duration_ms:>9.1f}ms  {r.status}")
+        if r.category == "llm":
+            llm_total += r.duration_ms
+            llm_n += 1
+        else:
+            tool_total += r.duration_ms
+            tool_n += 1
+
+    print()
+    print("  ── 汇总 ──")
+    print(f"  LLM   {llm_n} 次   {llm_total:>9.1f}ms")
+    print(f"  工具  {tool_n} 次   {tool_total:>9.1f}ms")
+    print(f"  总计          {llm_total + tool_total:>9.1f}ms")
+
 def main():
     parser = argparse.ArgumentParser(prog='aemeath')
     # 不传子命令时默认进 TUI(类似 claude code:敲 aemeath 直接进界面)
@@ -92,6 +136,9 @@ def main():
 
     p_tui = subparsers.add_parser('tui')     # 显式写法,和裸 aemeath 等价
     p_tui.set_defaults(func=cmd_tui)
+
+    p_trace = subparsers.add_parser('trace')  # 读最新 trace 文件,打印时间线
+    p_trace.set_defaults(func=cmd_trace)
 
     args = parser.parse_args()
     args.func(args)

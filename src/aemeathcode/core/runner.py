@@ -12,6 +12,8 @@ from aemeathcode.agent.tools import registry
 from aemeathcode.core.config import get_config
 from aemeathcode.agent.loop import Agent
 from aemeathcode.core.context import ExecutionContext
+from aemeathcode.core.trace.provider import TracingProvider
+from aemeathcode.core.trace.writer import TraceWriter
 
 
 class Runner:
@@ -25,10 +27,13 @@ class Runner:
         file_writer = FileWriter(Path(f"/home/administrator/cc_learn/AemeathCode/run/events_{run_time}.ndjson"))
         printer = EventLogger()
 
-        provider = AnthropicProvider(get_config().model)
+        trace_writer = TraceWriter(Path(f"/home/administrator/cc_learn/AemeathCode/run/traces_{run_time}.ndjson"))
+
+        provider = TracingProvider(inner=AnthropicProvider(get_config().model),
+                                   trace=trace_writer)
 
         run_id = str(uuid.uuid4())
-        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id)
+        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer)
         agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus)
 
         bus.subscribe(file_writer.write)

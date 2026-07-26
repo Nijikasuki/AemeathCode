@@ -2,6 +2,7 @@ from dataclasses import dataclass,field
 
 from aemeathcode.agent.llm.types import LlmResponse
 from aemeathcode.core.task.manager import TaskManager
+from aemeathcode.core.trace.writer import TraceWriter
 
 @dataclass
 class ExecutionContext:
@@ -16,6 +17,7 @@ class ExecutionContext:
     total_cache_read :int = 0
     messages: list[dict] = field(default_factory=list)
     tasks: TaskManager = field(default_factory=TaskManager)
+    trace: TraceWriter | None = None
 
     def __post_init__(self):
         if not self.messages:
