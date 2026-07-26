@@ -33,6 +33,6 @@ class TracingProvider:
                                  duration_ms=duration_ms,
                                  status=status,
                                  error=error)
-            await self._trace.write(record)
+            self._trace.emit(record)
 
 

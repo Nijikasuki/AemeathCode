@@ -18,9 +18,13 @@ async def invoke_tool(registry : ToolRegistry,
 
     await bus.publish(ToolCallStartEvent(tool_use_id = tool_call.id,tool_name=tool_call.name,params=tool_call.input,run_id=ctx.run_id))
     tool = registry.get(tool_call.name)
+    # 调用前先查 schema 里 required 的参数缺没缺,缺了直接返回、不进 invoke(tool 为 None 时给空列表)
+    missing = [p for p in tool.input_schema.get("required", []) if p not in tool_call.input] if tool else []
 
     if tool is None:
         result = ToolResult(content=f"未知工具:{tool_call.name}",is_error=True,error_type="unknown_tool")
+    elif missing:
+        result = ToolResult(content=f"缺少必需参数: {', '.join(missing)}",is_error=True,error_type="schema_error")
     else:
         start = time.monotonic()
         ts_start = datetime.now().isoformat()
@@ -46,6 +50,6 @@ async def invoke_tool(registry : ToolRegistry,
                                      duration_ms=duration_ms,
                                      status=status,
                                      error=error)
-                await ctx.trace.write(record)
+                ctx.trace.emit(record)
     await bus.publish(ToolCallFinishedEvent(tool_use_id=tool_call.id,is_error=result.is_error,content=result.content,run_id=ctx.run_id))
     return result

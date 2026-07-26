@@ -1,6 +1,11 @@
 import asyncio
 from aemeathcode.agent.tools.base import BaseTool, ToolResult
 
+_MAX_OUTPUT = 64 * 1024   # 输出上限,超了截断,防灌爆上下文
+_DEFAULT_TIMEOUT = 60     # 默认超时秒数
+_MAX_TIMEOUT = 120        # 超时上限,LLM 传再大也封顶
+
+
 class BashTool(BaseTool):
     name = "bash"
     description = "用于跑shell命令"
@@ -11,23 +16,28 @@ class BashTool(BaseTool):
             "command": {
                 "type": "string",
                 "description": "需要在shell中执行的命令"
+            },
+            "timeout": {
+                "type": "integer",
+                "description": f"最长等待秒数(默认 {_DEFAULT_TIMEOUT},最大 {_MAX_TIMEOUT})"
             }
         },
         "required": ["command"]
     }
 
-
-    async def invoke(self, param,ctx) -> ToolResult:
+    async def invoke(self, param, ctx) -> ToolResult:
         try:
             command = param["command"]
+            # 没传用默认;传了也不许超过上限
+            timeout = min(int(param.get("timeout") or _DEFAULT_TIMEOUT), _MAX_TIMEOUT)
 
             proc = await asyncio.create_subprocess_shell(command,
                                                   stdout=asyncio.subprocess.PIPE,
                                                   stderr=asyncio.subprocess.PIPE)
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
-                stdout = stdout.decode("utf-8")
-                stderr = stderr.decode("utf-8")
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                stdout = self._truncate(stdout.decode("utf-8"))
+                stderr = self._truncate(stderr.decode("utf-8"))
 
                 if proc.returncode != 0:
                     return ToolResult(content=f"stdout:{stdout},stderr:{stderr},returncode:{proc.returncode}", is_error=True, error_type="command_failed")
@@ -36,7 +46,8 @@ class BashTool(BaseTool):
 
             except asyncio.TimeoutError:
                 proc.kill()
-                return ToolResult(content="超时", is_error=True, error_type="timeout")
+                await proc.communicate()  # 收尸,别留僵尸
+                return ToolResult(content=f"超时(>{timeout}s)", is_error=True, error_type="timeout")
 
         except Exception as e:
             return ToolResult(
@@ -44,3 +55,9 @@ class BashTool(BaseTool):
                 is_error=True,
                 error_type="Exception"
             )
+
+    @staticmethod
+    def _truncate(text: str) -> str:
+        if len(text) > _MAX_OUTPUT:
+            return text[:_MAX_OUTPUT] + "\n[已截断]"
+        return text

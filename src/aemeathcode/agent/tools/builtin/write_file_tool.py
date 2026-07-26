@@ -1,6 +1,8 @@
 from pathlib import Path
 from aemeathcode.agent.tools.base import BaseTool, ToolResult
 
+_MAX_BYTES = 1 * 1024 * 1024  # 内容上限 1MB,防超大写入
+
 
 class WriteFileTool(BaseTool):
     name = "write_file"
@@ -27,6 +29,14 @@ class WriteFileTool(BaseTool):
 
             path = param["path"]
             content = param["content"]
+
+            # 内容超 1MB 拒绝,防灌爆磁盘/上下文
+            if len(content.encode("utf-8")) > _MAX_BYTES:
+                return ToolResult(
+                    content=f"错误:内容过大({len(content.encode('utf-8'))} 字节,上限 1MB)",
+                    is_error=True,
+                    error_type="content_too_large"
+                )
 
             file_path = (cwd / path).resolve()
 
