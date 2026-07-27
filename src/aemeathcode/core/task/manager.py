@@ -1,5 +1,5 @@
+from __future__ import annotations
 from aemeathcode.core.task.model import Task
-
 
 class TaskManager:
     def __init__(self):
@@ -24,3 +24,16 @@ class TaskManager:
             return None
         task.status = status
         return task
+
+    def to_dict(self)->dict:
+        return {"next_id":self._next_task_id,
+                "tasks":[t.model_dump() for t in self._tasks.values()]}
+
+    @classmethod
+    def from_dict(cls,task_dict:dict)->TaskManager:
+        mgr = cls()
+        mgr._next_task_id = task_dict.get("next_id",1)
+        for t in task_dict.get("tasks",[]):
+            task = Task.model_validate(t)
+            mgr._tasks[task.id] = task
+        return mgr

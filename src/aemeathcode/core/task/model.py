@@ -1,7 +1,7 @@
-from dataclasses import dataclass
+from pydantic import BaseModel
 
-@dataclass
-class Task:
+
+class Task(BaseModel):
     id:int
     content:str
     status:str

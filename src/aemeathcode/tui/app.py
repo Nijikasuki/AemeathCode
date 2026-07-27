@@ -9,9 +9,13 @@
 """
 from datetime import datetime
 
+from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import VerticalScroll
-from textual.widgets import Input, Label, Static
+from textual.containers import Vertical, VerticalScroll
+from textual.screen import ModalScreen
+from textual.suggester import SuggestFromList
+from textual.widgets import Input, Label, OptionList, Static
+from textual.widgets.option_list import Option
 
 from aemeathcode.core.config import get_config
 from aemeathcode.transport.socket_client import SocketClient
@@ -37,6 +41,59 @@ def _elapsed_ms(start_iso: str | None, end_iso: str | None) -> int:
         return 0
 
 
+class SessionPicker(ModalScreen[str | None]):
+    """模态弹层:列出会话,↑↓ 选、Enter 返回选中的完整 session_id、Esc 取消返回 None。"""
+
+    BINDINGS = [("escape", "dismiss_none", "取消")]
+
+    DEFAULT_CSS = """
+    SessionPicker {
+        align: center middle;
+    }
+    SessionPicker #picker-box {
+        width: 80%;
+        max-width: 100;
+        height: auto;
+        max-height: 80%;
+        border: round $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    SessionPicker #picker-title {
+        margin-bottom: 1;
+    }
+    """
+
+    def __init__(self, sessions: list) -> None:
+        super().__init__()
+        self._sessions = sessions
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="picker-box"):
+            yield Label("选择要恢复的会话  ( ↑↓ 选择 · Enter 确认 · Esc 取消 )", id="picker-title")
+            options = [
+                Option(self._label(s), id=s.get("id"))
+                for s in self._sessions
+            ]
+            yield OptionList(*options, id="picker-list")
+
+    @staticmethod
+    def _label(s: dict) -> str:
+        updated = (s.get("updated_at") or "")[:19]
+        title = s.get("title") or "(无标题)"
+        short = (s.get("id") or "")[:8]
+        return f"{title}    {updated}    {short}"
+
+    def on_mount(self) -> None:
+        self.query_one("#picker-list", OptionList).focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)   # 返回选中会话的完整 id
+
+    def action_dismiss_none(self) -> None:
+        self.dismiss(None)
+
+
 class AemeathApp(App):
     CSS = APP_CSS
     BINDINGS = [("ctrl+q", "quit", "退出")]
@@ -44,6 +101,7 @@ class AemeathApp(App):
     def __init__(self) -> None:
         super().__init__()
         self._client: SocketClient | None = None
+        self._session_id: str | None = None         # 连上后 create 一次,之后每次 run 复用
         self._block: LLMStreamBlock | None = None   # 当前活跃的流式块
         self._stream_type: str | None = None        # 当前在流哪一种
         # tool_use_id → (块, 开始时间);结果事件后到,靠它找回对应的块
@@ -52,7 +110,11 @@ class AemeathApp(App):
     def compose(self) -> ComposeResult:
         yield Label("[bold]AemeathCode[/bold]  [dim]connecting…[/dim]", id="status")
         yield VerticalScroll(id="log")
-        yield Input(placeholder="输入目标，回车执行  ·  Ctrl+Q 退出", id="goal")
+        yield Input(
+            placeholder="输入目标回车执行  ·  / 命令(灰字提示,→ 补全)  ·  Ctrl+Q 退出",
+            id="goal",
+            suggester=SuggestFromList(["/sessions", "/resume", "/clear", "/usage", "/exit"], case_sensitive=False),
+        )
 
     def on_mount(self) -> None:
         self.register_theme(AEMEATH_THEME)
@@ -89,9 +151,29 @@ class AemeathApp(App):
 
         client.on_event(self._on_event)
         self._client = client
-        self._set_status(f"[dim]{config.host}:{config.port}[/dim]  [$success]ready[/$success]")
-        # 常驻读循环:send_command 的响应正是靠它唤醒
-        await client.run_event_loop()
+
+        # 读循环必须【先】并发跑起来:send_command 的响应正是靠它读到再唤醒 Future。
+        # 所以把它丢到后台 worker,而不是在这一行阻塞等它。
+        self.run_worker(self._read_loop)
+
+        # 现在有人在读了 → 才能发 session.create 并 await 到它的响应。
+        try:
+            resp = await client.send_command("session.create", {})
+            self._session_id = resp["session_id"]
+        except Exception as e:  # noqa: BLE001
+            self._set_status("[$error]session 创建失败[/$error]")
+            await view.mount(Static(f"创建会话失败: {e}", classes="sys"))
+            return
+
+        self._set_status(
+            f"[dim]{config.host}:{config.port}[/dim]  [$success]ready[/$success]  "
+            f"[dim]session {self._session_id[:8]}[/dim]"
+        )
+
+    async def _read_loop(self) -> None:
+        """常驻读循环单独占一个 worker:与 send_command 并发,负责读响应/派发事件。"""
+        assert self._client is not None
+        await self._client.run_event_loop()
         self._set_status("[$error]disconnected[/$error]")
 
     async def _on_event(self, event: dict) -> None:
@@ -141,23 +223,123 @@ class AemeathApp(App):
     # ---- 输入 ----
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
-        goal = event.value.strip()
-        if not goal:
+        text = event.value.strip()
+        if not text:
             return
         event.input.value = ""
 
         view = self.query_one("#log", VerticalScroll)
-        await view.mount(Static(f"❯ {goal}", classes="user"))
-        view.scroll_end(animate=False)
 
         if self._client is None:
             await view.mount(Static("尚未连接到 core，请检查 core 是否已启动。", classes="sys"))
             return
 
+        # 斜杠命令:分流,不当 goal 发出去
+        if text.startswith("/"):
+            await self._handle_command(text, view)
+            return
+
+        await view.mount(Static(f"❯ {text}", classes="user"))
+        view.scroll_end(animate=False)
+
+        if self._session_id is None:
+            await view.mount(Static("会话尚未就绪，请稍候…", classes="sys"))
+            return
+
         self._end_block()
         self._set_status("[$accent]running…[/$accent]")
-        await self._client.send_command("run", {"goal": goal})
+        await self._client.send_command("run", {"goal": text, "session_id": self._session_id})
         view.scroll_end(animate=False)
+
+    # ---- 斜杠命令(跟 CLI chat 同一套:检测 → 调对应 session.* 命令)----
+
+    async def _handle_command(self, text: str, view: VerticalScroll) -> None:
+        if text == "/sessions":
+            resp = await self._client.send_command("session.list", {})
+            await self._show_sessions(resp["sessions"], view)
+        elif text == "/usage":
+            resp = await self._client.send_command("session.usage", {"session_id": self._session_id})
+            if isinstance(resp, str):
+                await view.mount(Static(resp, classes="sys"))
+            else:
+                await view.mount(Static(
+                    f"📊 本会话累计 token:输入 {resp['input_tokens']} · "
+                    f"输出 {resp['output_tokens']} · 缓存读 {resp['cache_read']}",
+                    classes="sys"))
+        elif text == "/clear":
+            created = await self._client.send_command("session.create", {"mode": "multi_turn"})
+            self._session_id = created["session_id"]
+            await view.remove_children()
+            await view.mount(Static(f"🧹 已开新会话 (session={self._session_id[:8]})", classes="sys"))
+        elif text.startswith("/resume"):
+            parts = text.split(maxsplit=1)
+            if len(parts) >= 2:                       # /resume <id>:直接恢复
+                await self._do_resume(parts[1].strip(), view)
+            else:                                     # /resume:弹选择器(在 worker 里跑)
+                self._pick_and_resume(view)
+        else:
+            await view.mount(Static(f"未知命令:{text}  (可用 /sessions /resume /clear)", classes="sys"))
+        view.scroll_end(animate=False)
+
+    @work
+    async def _pick_and_resume(self, view: VerticalScroll) -> None:
+        # push_screen_wait 会挂起等弹层关闭,必须在 worker 里跑,否则堵住消息泵
+        resp = await self._client.send_command("session.list", {})
+        sessions = resp["sessions"]
+        if not sessions:
+            await view.mount(Static("(还没有历史会话)", classes="sys"))
+            return
+        target = await self.push_screen_wait(SessionPicker(sessions))
+        if target:                                    # None = Esc 取消
+            await self._do_resume(target, view)
+
+    async def _do_resume(self, target: str, view: VerticalScroll) -> None:
+        resp = await self._client.send_command("session.resume", {"session_id": target})
+        if isinstance(resp, str):      # handler 用字符串报错(如"会话不存在")
+            await view.mount(Static(resp, classes="sys"))
+            return
+        self._session_id = resp["session_id"]
+        await view.remove_children()
+        title = resp.get("title") or ""
+        await view.mount(Static(f"⏪ 已恢复会话 (session={self._session_id[:8]}  {title})", classes="sys"))
+        await self._replay_history(resp["history"], view)
+
+    async def _show_sessions(self, sessions: list, view: VerticalScroll) -> None:
+        if not sessions:
+            await view.mount(Static("(还没有历史会话)", classes="sys"))
+            return
+        lines = ["历史会话(最近在前):"]
+        for s in sessions:
+            updated = (s.get("updated_at") or "")[:19]
+            title = s.get("title") or "(无标题)"
+            lines.append(f"  {s.get('id')}  {updated}  {title}")   # 完整 id,方便复制去 /resume
+        await view.mount(Static("\n".join(lines), classes="sys"))
+
+    async def _replay_history(self, history: list, view: VerticalScroll) -> None:
+        for msg in history:
+            content = _extract_text(msg.get("content"))
+            if not content.strip():
+                continue   # 跳过纯 tool 块的消息
+            if msg.get("role") == "user":
+                await view.mount(Static(f"❯ {content}", classes="user"))
+            else:
+                # 用跟 live 回答同款的块渲染 markdown,观感一致(粗体/列表/分隔线才好看)
+                block = LLMStreamBlock(markdown=True, classes="answer")
+                await view.mount(block)
+                block.append_token(content)
+                block.finalize()
+
+
+def _extract_text(content) -> str:
+    """从一条 message 的 content 抽可读文本:str 直接用;list 取 text 块。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
 
 
 def run() -> None:

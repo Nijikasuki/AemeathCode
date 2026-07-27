@@ -41,6 +41,12 @@ class Agent:
             self.ctx.token_add(resp)
 
             if resp.stop_reason == "end_turn":
+                blocks = []
+                if resp.text:
+                    blocks.append({"type": "text", "text": resp.text})
+                if blocks:
+                    self.ctx.add_assistant_message(content=blocks)
+
                 await self.bus.publish(RunFinishedEvent(status="success",
                                                         run_id=self.ctx.run_id,
                                                         steps=self.ctx.step,

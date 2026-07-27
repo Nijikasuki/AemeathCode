@@ -17,10 +17,12 @@ from aemeathcode.core.trace.writer import TraceWriter
 
 
 class Runner:
-    def __init__(self,broadcaster):
+    def __init__(self,broadcaster,session_manager):
         self._tasks: set[asyncio.Task] = set()
         self._broadcaster = broadcaster
-    def start_run(self,goal:str)->str:
+        self._session_manager = session_manager
+
+    def start_run(self,goal:str,session_id:str)->str:
         bus = EventBus()
         run_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -32,21 +34,31 @@ class Runner:
         provider = TracingProvider(inner=AnthropicProvider(get_config().model),
                                    trace=trace_writer)
 
+
         run_id = str(uuid.uuid4())
-        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer)
+        self._session_manager.mark_active(session_id)
+        history = self._session_manager.build_history(session_id)
+        runtime = self._session_manager.get(session_id)
+        if not runtime.session.run_ids:  # 还没有任何 run = 首轮
+            self._session_manager.set_title(session_id, goal.strip()[:30])
+        self._session_manager.add_run(session_id, run_id)
+        boundary = len(history)
+
+        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer,messages=history,tasks=runtime.tasks)
+
         agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus)
 
         bus.subscribe(file_writer.write)
         bus.subscribe(printer.handle)
         bus.subscribe(self._broadcaster.handle)
 
-        task = asyncio.create_task(self._run_guarded(agent, bus))
+        task = asyncio.create_task(self._run_guarded(agent, bus,session_id,boundary))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return run_id
 
-    @staticmethod
-    async def _run_guarded(agent, bus):
+    async def _run_guarded(self,agent, bus,session_id,boundary):
+
         if agent.ctx.trace is not None:
             agent.ctx.trace.start()
         try:
@@ -55,5 +67,12 @@ class Runner:
             await bus.publish(RunFinishedEvent(status="error", run_id=agent.ctx.run_id, steps=0,content=f"错误:{e}",
                                                input_tokens=agent.ctx.total_input_tokens,output_tokens=agent.ctx.total_output_tokens,cache_read=agent.ctx.total_cache_read))
         finally:
+            increment = agent.ctx.messages[boundary:]
+            self._session_manager.append_run_messages(session_id=session_id,run_id=agent.ctx.run_id,increment=increment)
+            self._session_manager.add_token(session_id=session_id,
+                                            input_tokens=agent.ctx.total_input_tokens,
+                                            output_tokens=agent.ctx.total_output_tokens,
+                                            cache_read=agent.ctx.total_cache_read)
+            self._session_manager.mark_waiting(session_id=session_id)
             if agent.ctx.trace is not None:
                 await agent.ctx.trace.stop()

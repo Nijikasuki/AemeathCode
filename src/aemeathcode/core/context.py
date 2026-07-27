@@ -9,19 +9,18 @@ class ExecutionContext:
     goal: str
     max_steps: int
     run_id: str
+    tasks: TaskManager
+    messages: list[dict]
     reason: str|None = None
     status: str = "running"
     step :int = 0
     total_input_tokens :int = 0
     total_output_tokens :int = 0
     total_cache_read :int = 0
-    messages: list[dict] = field(default_factory=list)
-    tasks: TaskManager = field(default_factory=TaskManager)
     trace: TraceWriter | None = None
 
     def __post_init__(self):
-        if not self.messages:
-            self.messages.append({"role": "user", "content": self.goal})
+        self.messages.append({"role": "user", "content": self.goal})
 
     def add_assistant_message(self,content:list):
         self.messages.append({"role": "assistant", "content": content})
