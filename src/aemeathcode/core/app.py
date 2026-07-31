@@ -4,6 +4,7 @@ import signal
 
 from aemeathcode.core.config import get_config
 from aemeathcode.core.logging_setup import setup_logging
+from aemeathcode.core.memory.note import NoteStore
 from aemeathcode.core.runner import Runner
 from aemeathcode.core.session.manager import SessionManager
 from aemeathcode.core.session.store import SessionStore
@@ -15,8 +16,9 @@ from aemeathcode.transport.ipc_broadcaster import IpcEventBroadcaster,Subscriber
 logger = logging.getLogger(__name__)
 broadcaster = IpcEventBroadcaster()
 store = SessionStore(Path("sessions"))
+note_store = NoteStore(Path("."))
 session_manager = SessionManager(store)
-runner = Runner(broadcaster,session_manager)
+runner = Runner(broadcaster,session_manager,note_store)
 
 async def ping_handler(ctx:RequestContext)->str:
     return "pong"

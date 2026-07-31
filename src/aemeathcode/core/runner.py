@@ -17,10 +17,11 @@ from aemeathcode.core.trace.writer import TraceWriter
 
 
 class Runner:
-    def __init__(self,broadcaster,session_manager):
+    def __init__(self,broadcaster,session_manager,note_store):
         self._tasks: set[asyncio.Task] = set()
         self._broadcaster = broadcaster
         self._session_manager = session_manager
+        self._note_store = note_store
 
     def start_run(self,goal:str,session_id:str)->str:
         bus = EventBus()
@@ -31,7 +32,7 @@ class Runner:
 
         trace_writer = TraceWriter(Path(f"/home/administrator/cc_learn/AemeathCode/run/traces_{run_time}.ndjson"))
 
-        provider = TracingProvider(inner=AnthropicProvider(get_config().model),
+        provider = TracingProvider(inner=AnthropicProvider(model = get_config().model,note_store=self._note_store),
                                    trace=trace_writer)
 
 
@@ -44,7 +45,7 @@ class Runner:
         self._session_manager.add_run(session_id, run_id)
         boundary = len(history)
 
-        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer,messages=history,tasks=runtime.tasks)
+        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer,messages=history,tasks=runtime.tasks,note_store=self._note_store)
 
         agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus)
 

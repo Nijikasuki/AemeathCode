@@ -5,23 +5,26 @@ from aemeathcode.agent.llm.types import LlmResponse, UsageStats, ToolCallBlock
 from anthropic import AsyncAnthropic
 
 from aemeathcode.agent.prompts import SYSTEM_PROMPT
+from aemeathcode.core.memory.note import NoteStore
 
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self,model:str):
+    def __init__(self,model:str,note_store:NoteStore) -> None:
         self._client = AsyncAnthropic()
         self.model = model
+        self._note_store = note_store
 
     async def chat(self,
                    messages: list[dict[str, object]],
                    tool_schemas: list[dict[str, object]],
                    bus: EventBus,
                    run_id: str) -> LlmResponse:
-        
-        async with self._client.messages.stream(system=[{
-                                                        "type": "text",
-                                                        "text": SYSTEM_PROMPT,
-                                                        "cache_control": {"type": "ephemeral"},}],
+        notes = self._note_store.load()
+        system = [{"type": "text","text": SYSTEM_PROMPT,"cache_control": {"type": "ephemeral"},}]
+        if notes:
+            system.append({"type": "text","text": "# 已记录的便签\n" + "\n".join(f"- {n}" for n in notes)})
+
+        async with self._client.messages.stream(system=system,
                                                 model=self.model,
                                                 max_tokens=8192,
                                                 tools=tool_schemas,

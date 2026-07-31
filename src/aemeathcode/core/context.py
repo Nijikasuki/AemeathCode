@@ -1,6 +1,7 @@
-from dataclasses import dataclass,field
+from dataclasses import dataclass
 
 from aemeathcode.agent.llm.types import LlmResponse
+from aemeathcode.core.memory.note import NoteStore
 from aemeathcode.core.task.manager import TaskManager
 from aemeathcode.core.trace.writer import TraceWriter
 
@@ -10,6 +11,7 @@ class ExecutionContext:
     max_steps: int
     run_id: str
     tasks: TaskManager
+    note_store: NoteStore
     messages: list[dict]
     reason: str|None = None
     status: str = "running"

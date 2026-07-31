@@ -9,7 +9,7 @@ from aemeathcode.core.trace.writer import TraceWriter
 
 
 class TracingProvider:
-    def __init__(self,inner:LLMProvider,trace:TraceWriter):
+    def __init__(self,inner:LLMProvider,trace:TraceWriter) -> None:
         self._inner = inner
         self._trace = trace
 
