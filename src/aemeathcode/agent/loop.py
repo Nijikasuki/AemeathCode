@@ -30,6 +30,7 @@ class Agent:
                                                         input_tokens=self.ctx.total_input_tokens,
                                                         output_tokens=self.ctx.total_output_tokens,
                                                         cache_read=self.ctx.total_cache_read))
+                self.ctx.mark_failed("达到最大轮数")
                 return None
 
             self.ctx.step+=1

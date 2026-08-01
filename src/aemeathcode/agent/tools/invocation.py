@@ -11,6 +11,8 @@ from aemeathcode.agent.tools.base import ToolResult
 from aemeathcode.core.context import ExecutionContext
 from aemeathcode.core.trace.record import TraceRecord
 
+_SAFETY_TIMEOUT = 300
+
 async def invoke_tool(registry : ToolRegistry,
                       tool_call : ToolCallBlock,
                       bus : EventBus,
@@ -31,7 +33,7 @@ async def invoke_tool(registry : ToolRegistry,
         status: Literal["ok", "error"] = "ok"
         error: str | None = None
         try:
-            result = await asyncio.wait_for(tool.invoke(tool_call.input,ctx=ctx), timeout=10)
+            result = await asyncio.wait_for(tool.invoke(tool_call.input,ctx=ctx), timeout=_SAFETY_TIMEOUT)
         except asyncio.TimeoutError:
             result = ToolResult(content="超时",is_error=True,error_type="timeout")
             error = "timeout"

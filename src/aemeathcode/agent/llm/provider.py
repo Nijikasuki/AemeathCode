@@ -39,7 +39,7 @@ class AnthropicProvider(LLMProvider):
         return LlmResponse(
             stop_reason= final.stop_reason,
             tool_calls = [ToolCallBlock(b.id,b.name,b.input) for b in final.content if b.type=="tool_use"],
-            text = next((b.text for b in final.content if b.type == "text"), ""),
+            text = "".join(b.text for b in final.content if b.type == "text"),
             usage = UsageStats(input_tokens=final.usage.input_tokens,
                                output_tokens=final.usage.output_tokens,
                                cache_creation_input_tokens=final.usage.cache_creation_input_tokens,

@@ -1,4 +1,5 @@
 import asyncio
+import os, signal
 from aemeathcode.agent.tools.base import BaseTool, ToolResult
 
 _MAX_OUTPUT = 64 * 1024   # 输出上限,超了截断,防灌爆上下文
@@ -32,12 +33,13 @@ class BashTool(BaseTool):
             timeout = min(int(param.get("timeout") or _DEFAULT_TIMEOUT), _MAX_TIMEOUT)
 
             proc = await asyncio.create_subprocess_shell(command,
-                                                  stdout=asyncio.subprocess.PIPE,
-                                                  stderr=asyncio.subprocess.PIPE)
+                                                        stdout=asyncio.subprocess.PIPE,
+                                                        stderr=asyncio.subprocess.PIPE,
+                                                        start_new_session=True)
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-                stdout = self._truncate(stdout.decode("utf-8"))
-                stderr = self._truncate(stderr.decode("utf-8"))
+                stdout = self._truncate(stdout.decode("utf-8",errors="replace"))
+                stderr = self._truncate(stderr.decode("utf-8",errors="replace"))
 
                 if proc.returncode != 0:
                     return ToolResult(content=f"stdout:{stdout},stderr:{stderr},returncode:{proc.returncode}", is_error=True, error_type="command_failed")
@@ -45,9 +47,15 @@ class BashTool(BaseTool):
                 return ToolResult(content=f"stdout:{stdout}", is_error=False)
 
             except asyncio.TimeoutError:
-                proc.kill()
-                await proc.communicate()  # 收尸,别留僵尸
                 return ToolResult(content=f"超时(>{timeout}s)", is_error=True, error_type="timeout")
+
+            finally:
+                if proc.returncode is None:  # 还在跑(超时/被取消/异常)→ 收拾掉
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await proc.wait()
 
         except Exception as e:
             return ToolResult(

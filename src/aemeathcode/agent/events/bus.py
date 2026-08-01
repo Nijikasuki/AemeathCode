@@ -1,4 +1,5 @@
-import asyncio
+import logging
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel
 
@@ -13,27 +14,7 @@ class EventBus:
 
     async def publish(self,event:BaseModel):
         for subscriber in self._subscribers:
-            await subscriber(event)
-
-
-
-
-if __name__ == "__main__":
-    async def test(event):
-        print(event)
-
-
-    async def test1(event):
-        print(f"test1{event}")
-
-
-    async def main():
-        event_bus = EventBus()
-
-        event_bus.subscribe(test)
-        event_bus.subscribe(test1)
-
-        await event_bus.publish("test")
-
-
-    asyncio.run(main())
+            try:
+                await subscriber(event)
+            except Exception:  # 注意:只抓 Exception,放 CancelledError 过
+                logger.exception("订阅者处理事件失败: %s", getattr(subscriber, "__name__", subscriber))

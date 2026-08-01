@@ -8,7 +8,7 @@ from aemeathcode.core.trace.record import TraceRecord
 from aemeathcode.core.trace.writer import TraceWriter
 
 
-class TracingProvider:
+class TracingProvider(LLMProvider):
     def __init__(self,inner:LLMProvider,trace:TraceWriter) -> None:
         self._inner = inner
         self._trace = trace

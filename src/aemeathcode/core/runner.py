@@ -69,6 +69,7 @@ class Runner:
                                                input_tokens=agent.ctx.total_input_tokens,output_tokens=agent.ctx.total_output_tokens,cache_read=agent.ctx.total_cache_read))
         finally:
             increment = agent.ctx.messages[boundary:]
+            increment = self._sanitize(increment)
             self._session_manager.append_run_messages(session_id=session_id,run_id=agent.ctx.run_id,increment=increment)
             self._session_manager.add_token(session_id=session_id,
                                             input_tokens=agent.ctx.total_input_tokens,
@@ -77,3 +78,22 @@ class Runner:
             self._session_manager.mark_waiting(session_id=session_id)
             if agent.ctx.trace is not None:
                 await agent.ctx.trace.stop()
+
+    def _sanitize(self,increment:list[dict])->list[dict]:
+        """
+        给落单的 tool_use 补上 tool_result。
+        run 若在"tool_use 已发出、tool_result 还没回填"的中途被 cancel,
+        这段残缺增量存进历史后,下轮发给 LLM 会因"tool_use 找不到配对的 tool_result"而 400。
+
+        修法:在【最后一条】assistant 里找出所有未闭合的 tool_use,追加一条 user 消息,
+        给每个补一个 is_error 的"运行中断" tool_result,让配对重新合法。
+        """
+        if increment and increment[-1]["role"]=="assistant":
+            content = increment[-1]["content"]
+            tools_result = []
+            for b in content:
+                if b.get("type") == "tool_use":
+                    tools_result.append({"type":"tool_result","tool_use_id":b.get("id"),"content":"运行中断","is_error":True})
+            if tools_result:
+                increment.append({"role":"user","content":tools_result})
+        return increment

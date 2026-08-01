@@ -100,7 +100,32 @@ class SessionManager:
             for run_id in runtime.session.run_ids:
                 history.extend(runtime.run_messages.get(run_id,[]))
 
-        return history
+        return self._trim_orphan(history)
+
+    def _trim_orphan(self,messages:list[dict])->list[dict]:
+        """读端孤儿兜底:截掉尾部未配对的 tool_use 及其之后的消息。
+
+        写端 _sanitize 已在存增量时补齐配对;这里是【读历史喂 LLM 前】的最后一道安全网。
+        用括号平衡遍历:tool_use 是左括号、tool_result 是右括号,记住"全部闭合"的最后一条
+        位置 last_balance;若结束时仍有未闭合的 tool_use,就截到那个平衡点,保证喂给
+        Anthropic 的 messages 一定配对合法、不触发 400。也顺带清掉修复前遗留的残缺旧会话。
+        """
+        pending = set()
+        last_balance = 0
+
+        for i, msg in enumerate(messages, start=1):
+            content = msg.get("content")
+            if isinstance(content, list):
+                for b in content:
+                    if b.get("type") == "tool_use":
+                        pending.add(b.get("id"))
+                    elif b.get("type") == "tool_result":
+                        pending.discard(b.get("tool_use_id"))
+
+            if not pending:
+                last_balance = i
+
+        return messages[:last_balance] if pending else messages
 
     def add_token(self,session_id:str,
                   input_tokens:int,
