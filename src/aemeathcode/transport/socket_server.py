@@ -4,18 +4,20 @@ import logging
 
 from pydantic import ValidationError
 
-from aemeathcode.bus.envelope import make_error, JsonRpcRequest, JsonRpcSuccess
+from aemeathcode.bus.envelope import make_error, JsonRpcRequest, JsonRpcSuccess, ReplyEnvelope
 from aemeathcode.transport.context import RequestContext
 
 logger = logging.getLogger(__name__)
 
 class SocketServer:
-    def __init__(self,host:str,port:int,broadcaster):
+    def __init__(self,host:str,port:int,broadcaster,approval_registry):
         self.host = host
         self.port = port
         self._handlers = {}
         self._server = None
         self._broadcaster = broadcaster
+        self._approval_registry = approval_registry
+
     def register(self,method:str,handler):
         self._handlers[method] = handler
 
@@ -47,6 +49,7 @@ class SocketServer:
                 await self._handle_line(line, writer)
         finally:
             self._broadcaster.unsubscribe(writer)
+            self._approval_registry.fail_writer(writer)
             writer.close()
             await writer.wait_closed()
 
@@ -56,6 +59,15 @@ class SocketServer:
         except json.decoder.JSONDecodeError:
             response = make_error(None, -32700, "Parse Error")
             await self._send(response, writer)
+            return
+
+        if msg_dict.get("kind") == "reply":
+            try:
+                req = ReplyEnvelope.model_validate(msg_dict)
+            except ValidationError:
+                logger.warning("收到非法 reply,已忽略: %s", msg_dict)
+                return
+            self._approval_registry.resolve(approval_id=req.approval_id,decision=req.decision)
             return
         try:
             req = JsonRpcRequest.model_validate(msg_dict)

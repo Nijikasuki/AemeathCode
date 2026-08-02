@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -19,3 +20,10 @@ def get_config():
         model=os.environ.get("AEMEATH_LLM_DEFAULT_MODEL"),
         max_steps=int(os.environ.get("AEMEATH_MAX_STEPS")),
     )
+
+def get_data_dir() -> Path:
+    """所有本地数据(sessions / run / note.md / permissions.json)的根目录。
+    轻量:只读 AEMEATH_DATA_DIR(默认 .aemeath),不依赖 LLM 相关配置,
+    所以 aemeath trace 这类命令用它也不会被迫要 model/max_steps。"""
+    load_dotenv()
+    return Path(os.environ.get("AEMEATH_DATA_DIR", ".aemeath"))

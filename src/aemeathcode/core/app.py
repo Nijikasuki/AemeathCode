@@ -1,24 +1,30 @@
 import asyncio
 import logging
 import signal
-
-from aemeathcode.core.config import get_config
+from aemeathcode.core.config import get_config, get_data_dir
 from aemeathcode.core.logging_setup import setup_logging
 from aemeathcode.core.memory.note import NoteStore
+from aemeathcode.core.permissions.storage import PermissionStore
 from aemeathcode.core.runner import Runner
 from aemeathcode.core.session.manager import SessionManager
 from aemeathcode.core.session.store import SessionStore
-from pathlib import Path
+from aemeathcode.core.permissions.manager import PermissionsManager
+from aemeathcode.transport.approval_registry import ApprovalRegistry
 from aemeathcode.transport.context import RequestContext
 from aemeathcode.transport.socket_server import SocketServer
 from aemeathcode.transport.ipc_broadcaster import IpcEventBroadcaster,Subscriber
 
+
 logger = logging.getLogger(__name__)
+DATA_DIR = get_data_dir()   # 所有本地数据统一收进这里(默认 .aemeath/)
 broadcaster = IpcEventBroadcaster()
-store = SessionStore(Path("sessions"))
-note_store = NoteStore(Path("."))
+store = SessionStore(DATA_DIR / "sessions")
+note_store = NoteStore(DATA_DIR)
 session_manager = SessionManager(store)
-runner = Runner(broadcaster,session_manager,note_store)
+approval_registry = ApprovalRegistry()
+permission_store = PermissionStore(DATA_DIR)
+permissions_manager = PermissionsManager(permission_store)
+runner = Runner(broadcaster,session_manager,note_store,approval_registry,permissions_manager)
 
 async def ping_handler(ctx:RequestContext)->str:
     return "pong"
@@ -33,7 +39,7 @@ async def run_handler(ctx:RequestContext)->dict|str:
     if session_manager.get(session_id) is None:
         return "错误:会话不存在"
 
-    run_id = runner.start_run(goal=goal,session_id=session_id)
+    run_id = runner.start_run(goal=goal,session_id=session_id,writer=ctx.writer)
     broadcaster.subscribe(Subscriber(writer = ctx.writer,scope=f"run:{run_id}",topics=["*"]))
     return {"run_id": run_id}
 
@@ -84,7 +90,7 @@ async def session_usage_handler(ctx:RequestContext)->dict|str:
 async def main():
     config = get_config()
     setup_logging(config)
-    server = SocketServer(host=config.host,port=config.port,broadcaster=broadcaster)
+    server = SocketServer(host=config.host,port=config.port,broadcaster=broadcaster,approval_registry=approval_registry)
     server.register(method="ping",handler=ping_handler)
     server.register(method="run",handler=run_handler)
     server.register(method="watch",handler=watch_handler)

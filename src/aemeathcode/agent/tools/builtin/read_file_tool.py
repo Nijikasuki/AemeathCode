@@ -15,9 +15,9 @@ class ReadFileTool(BaseTool):
         "required": ["path"]
     }
     max_size = 1024*1024
-    async def invoke(self, param,ctx) -> ToolResult:
+    async def invoke(self, params,ctx) -> ToolResult:
         try:
-            path = param["path"]
+            path = params["path"]
             file_path = Path(path)
 
             # 1. 判断路径是否存在

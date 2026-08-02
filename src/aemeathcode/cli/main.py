@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,7 @@ async def _run(goal:str):
             done.set()
 
     client.on_event(on_event)
+    client.on_ask(_prompt_ask)                                # 反向审批:daemon 问,命令行答
     loop_task = asyncio.create_task(client.run_event_loop())
 
     # run 也要 session:一次性执行 = 建一个 single_turn 会话,只跑这一发
@@ -47,17 +49,33 @@ async def _run(goal:str):
 
 
 async def _read_line(prompt:str) -> str | None:
-    """异步读一行:线程池里读【原始字节】,自己按 UTF-8 解码;EOF 返回 None。
+    """异步读一行:线程池里读原始字节,自己按 UTF-8 解码;EOF 返回 None。
 
-    不走 input():input() 用 readline 模块 + 依赖 locale 做文本解码,在工作线程里反复
-    调用会把多字节中文解成 surrogate 代理字符,后续 JSON 序列化直接炸。读 bytes 自己
-    decode 既绕开 readline 的线程问题,也绕开 locale 解码,最稳。"""
+    读 bytes 自己 decode(不走 input()):input() 依赖 locale 解码,多字节中文会被解成
+    surrogate 代理字符,后续 JSON 序列化直接炸。
+
+    Ctrl+C 时这个工作线程会卡在 readline 上无法干净收尾 —— 由 main() 用 os._exit 硬退兜底。"""
     loop = asyncio.get_running_loop()
     print(prompt, end="", flush=True)
     raw = await loop.run_in_executor(None, sys.stdin.buffer.readline)
     if not raw:  # 空字节 = EOF(Ctrl+D)
         return None
     return raw.decode("utf-8", errors="replace")
+
+
+async def _prompt_ask(ask: dict) -> str:
+    """CLI 侧的审批应答器:daemon 反向问权限时,打印请求 + 读 stdin 让用户拍板。
+
+    安全用 _read_line(不怕和主输入循环抢 stdin):审批只在 run 进行中发生,那时
+    _run/_chat 都停在 await done.wait(),没在读 stdin,两者天然错开。
+    EOF / 乱输入 → deny(fail-closed,跟 TUI 的 Esc=deny 一致)。"""
+    tool = ask.get("tool_name", "")
+    detail = ask.get("detail", "")
+    print(f"\n⚠️  权限请求 · {tool}: {detail}")
+    line = await _read_line("[1] 允许一次  [2] 总是允许  [3] 拒绝 > ")
+    if line is None:
+        return "deny"
+    return {"1": "allow_once", "2": "allow_always", "3": "deny"}.get(line.strip(), "deny")
 
 
 def _print_sessions(sessions):
@@ -110,13 +128,15 @@ async def _chat():
             done.set()
 
     client.on_event(on_event)
+    client.on_ask(_prompt_ask)                                # 反向审批:daemon 问,命令行答
     loop_task = asyncio.create_task(client.run_event_loop())  # 读循环后台常驻
 
     # 多轮对话 = 一个 multi_turn 会话,全程复用同一个 session_id
     session = await client.send_command("session.create", {"mode": "multi_turn"})
     session_id = session["session_id"]
     print(f"💬 会话已开始 (session={session_id[:8]})   "
-          f"/sessions · /resume <id> · /clear · /usage · /exit\n")
+          f"/sessions · /resume <id> · /clear · /usage\n"
+          f"   退出:/exit(或 Ctrl+D / Ctrl+C)\n")
 
     try:
         while True:
@@ -208,8 +228,9 @@ def cmd_tui(args):
 def cmd_trace(args):
     # trace 不连 daemon,纯读本地文件,所以是同步的,不用 asyncio.run
     from aemeathcode.core.trace.record import TraceRecord
+    from aemeathcode.core.config import get_data_dir
 
-    run_dir = Path("run")  # 约定从项目根目录运行
+    run_dir = get_data_dir() / "run"  # 与 daemon 写入路径统一到 config,不再各写各的
     files = sorted(run_dir.glob("traces_*.ndjson"))  # 文件名带时间戳,字典序=时间序
     if not files:
         print("还没有 trace 文件(先跑一个 aemeath run)")
@@ -278,7 +299,14 @@ def main():
     p_trace.set_defaults(func=cmd_trace)
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        # Ctrl+C:读 stdin 的工作线程还卡在 readline 上,正常关闭流程会被它绊住
+        # (join 卡死 / 抢 stdin 缓冲锁 fatal)。os._exit 硬退,跳过 atexit 与 IO finalize,
+        # 那个卡住的线程随进程一起被系统回收。此时 _chat 的 finally 已跑完(连接已关)。
+        sys.stdout.flush()
+        os._exit(0)
 
 if __name__ == "__main__":
     main()

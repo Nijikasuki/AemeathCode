@@ -17,3 +17,9 @@ class BaseTool(ABC):
     @abstractmethod
     async def invoke(self, params,ctx:ExecutionContext) -> ToolResult:
         pass
+
+    def permission_key(self, params) -> str:
+        return self.name  # 默认整工具粒度
+
+    def permission_detail(self, params) -> str:
+        return str(params)

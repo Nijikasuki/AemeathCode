@@ -26,11 +26,21 @@ class BashTool(BaseTool):
         "required": ["command"]
     }
 
-    async def invoke(self, param, ctx) -> ToolResult:
+    def permission_key(self, params) -> str:
+        # 粗粒度:按命令首词(程序名)记忆,如 "bash:npm" —— 批过 npm 就别再问 npm
+        parts = params.get("command", "").split()
+        first = parts[0] if parts else ""
+        return f"bash:{first}"
+
+    def permission_detail(self, params) -> str:
+        # 给人看的:整条命令
+        return params.get("command", "")
+
+    async def invoke(self, params, ctx) -> ToolResult:
         try:
-            command = param["command"]
+            command = params["command"]
             # 没传用默认;传了也不许超过上限
-            timeout = min(int(param.get("timeout") or _DEFAULT_TIMEOUT), _MAX_TIMEOUT)
+            timeout = min(int(params.get("timeout") or _DEFAULT_TIMEOUT), _MAX_TIMEOUT)
 
             proc = await asyncio.create_subprocess_shell(command,
                                                         stdout=asyncio.subprocess.PIPE,

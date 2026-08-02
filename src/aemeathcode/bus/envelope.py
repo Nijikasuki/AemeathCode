@@ -29,3 +29,15 @@ class EventEnvelope(BaseModel):
 
 def make_error(id,code,message):
     return JsonRpcError(id = id,error = JsonRpcErrorObject(code = code,message = message))
+
+class AskEnvelope(BaseModel):
+    kind :Literal["ask"] = "ask"
+    approval_id: str
+    tool_name: str
+    detail: str
+    run_id: str
+
+class ReplyEnvelope(BaseModel):
+    kind :Literal["reply"] = "reply"
+    approval_id: str
+    decision: Literal["allow_once","allow_always","deny"]

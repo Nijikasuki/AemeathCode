@@ -2,8 +2,10 @@ from dataclasses import dataclass
 
 from aemeathcode.agent.llm.types import LlmResponse
 from aemeathcode.core.memory.note import NoteStore
+from aemeathcode.core.permissions.manager import PermissionsManager
 from aemeathcode.core.task.manager import TaskManager
 from aemeathcode.core.trace.writer import TraceWriter
+from aemeathcode.transport.approver import Approver
 
 @dataclass
 class ExecutionContext:
@@ -12,6 +14,7 @@ class ExecutionContext:
     run_id: str
     tasks: TaskManager
     note_store: NoteStore
+    permission_manager: PermissionsManager
     messages: list[dict]
     reason: str|None = None
     status: str = "running"
@@ -20,6 +23,7 @@ class ExecutionContext:
     total_output_tokens :int = 0
     total_cache_read :int = 0
     trace: TraceWriter | None = None
+    approver: Approver | None = None
 
     def __post_init__(self):
         self.messages.append({"role": "user", "content": self.goal})

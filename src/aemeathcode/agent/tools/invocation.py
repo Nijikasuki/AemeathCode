@@ -28,30 +28,34 @@ async def invoke_tool(registry : ToolRegistry,
     elif missing:
         result = ToolResult(content=f"缺少必需参数: {', '.join(missing)}",is_error=True,error_type="schema_error")
     else:
-        start = time.monotonic()
-        ts_start = datetime.now().isoformat()
-        status: Literal["ok", "error"] = "ok"
-        error: str | None = None
-        try:
-            result = await asyncio.wait_for(tool.invoke(tool_call.input,ctx=ctx), timeout=_SAFETY_TIMEOUT)
-        except asyncio.TimeoutError:
-            result = ToolResult(content="超时",is_error=True,error_type="timeout")
-            error = "timeout"
-            status = "error"
-        except Exception as e:
-            result = ToolResult(content=f"运行出错{e}", is_error=True, error_type="runtime_error")
-            error = f"运行出错{e}"
-            status = "error"
-        finally:
-            if ctx.trace is not None:
-                duration_ms = (time.monotonic() - start) * 1000
-                record = TraceRecord(run_id=ctx.run_id,
-                                     category="tool",
-                                     name=tool_call.name,
-                                     ts=ts_start,
-                                     duration_ms=duration_ms,
-                                     status=status,
-                                     error=error)
-                ctx.trace.emit(record)
+        perm = await ctx.permission_manager.check(tool=tool,params=tool_call.input,approver=ctx.approver,run_id=ctx.run_id)
+        if not perm.allowed:
+            result = ToolResult(content=f"权限被拒绝:{perm.reason}",is_error=True, error_type="permission_denied")
+        else:
+            start = time.monotonic()
+            ts_start = datetime.now().isoformat()
+            status: Literal["ok", "error"] = "ok"
+            error: str | None = None
+            try:
+                result = await asyncio.wait_for(tool.invoke(params=tool_call.input,ctx=ctx), timeout=_SAFETY_TIMEOUT)
+            except asyncio.TimeoutError:
+                result = ToolResult(content="超时",is_error=True,error_type="timeout")
+                error = "timeout"
+                status = "error"
+            except Exception as e:
+                result = ToolResult(content=f"运行出错{e}", is_error=True, error_type="runtime_error")
+                error = f"运行出错{e}"
+                status = "error"
+            finally:
+                if ctx.trace is not None:
+                    duration_ms = (time.monotonic() - start) * 1000
+                    record = TraceRecord(run_id=ctx.run_id,
+                                         category="tool",
+                                         name=tool_call.name,
+                                         ts=ts_start,
+                                         duration_ms=duration_ms,
+                                         status=status,
+                                         error=error)
+                    ctx.trace.emit(record)
     await bus.publish(ToolCallFinishedEvent(tool_use_id=tool_call.id,is_error=result.is_error,content=result.content,run_id=ctx.run_id))
     return result

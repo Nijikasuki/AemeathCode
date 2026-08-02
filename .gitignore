@@ -27,6 +27,5 @@ dist/
 practice/
 CLAUDE.md
 
-run/
-sessions/
-note.md
+# 本地数据统一收进 .aemeath/(sessions / run / note.md / permissions.json)
+.aemeath/

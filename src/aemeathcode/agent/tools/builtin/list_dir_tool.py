@@ -15,9 +15,9 @@ class ListDirTool(BaseTool):
         "required": ["path"]
     }
 
-    async def invoke(self, param,ctx) -> ToolResult:
+    async def invoke(self, params,ctx) -> ToolResult:
         try:
-            path = param["path"]
+            path = params["path"]
             dir_path = Path(path)
 
             # 1. 判断路径是否存在

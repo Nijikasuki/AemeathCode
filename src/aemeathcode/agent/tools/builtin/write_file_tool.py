@@ -23,12 +23,22 @@ class WriteFileTool(BaseTool):
         "required": ["path", "content"]
     }
 
-    async def invoke(self, param,ctx) -> ToolResult:
+    def permission_key(self, params) -> str:
+        # 粗粒度:按目标文件的父目录记忆,如 "write_file:/home/x/proj/src"
+        # —— 批过往某目录写,同目录别再问。解析成绝对路径,免得 "a/b" 与 "./a/b" 算成两个 key
+        parent = (Path.cwd() / params.get("path", "")).resolve().parent
+        return f"write_file:{parent}"
+
+    def permission_detail(self, params) -> str:
+        # 给人看的:目标路径
+        return params.get("path", "")
+
+    async def invoke(self, params,ctx) -> ToolResult:
         try:
             cwd = Path.cwd()
 
-            path = param["path"]
-            content = param["content"]
+            path = params["path"]
+            content = params["content"]
 
             # 内容超 1MB 拒绝,防灌爆磁盘/上下文
             if len(content.encode("utf-8")) > _MAX_BYTES:

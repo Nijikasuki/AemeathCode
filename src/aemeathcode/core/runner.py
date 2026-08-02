@@ -1,7 +1,6 @@
 import asyncio
 import uuid
 
-from pathlib import Path
 from datetime import datetime
 from aemeathcode.agent.events.bus import EventBus
 from aemeathcode.agent.events.models import RunFinishedEvent
@@ -9,32 +8,39 @@ from aemeathcode.agent.events.printer import EventLogger
 from aemeathcode.agent.events.writer import FileWriter
 from aemeathcode.agent.llm.provider import AnthropicProvider
 from aemeathcode.agent.tools import registry
-from aemeathcode.core.config import get_config
+from aemeathcode.core.config import get_config, get_data_dir
 from aemeathcode.agent.loop import Agent
 from aemeathcode.core.context import ExecutionContext
 from aemeathcode.core.trace.provider import TracingProvider
 from aemeathcode.core.trace.writer import TraceWriter
+from aemeathcode.transport.approver import Approver
 
 
 class Runner:
-    def __init__(self,broadcaster,session_manager,note_store):
+    def __init__(self,broadcaster,session_manager,note_store,approval_registry,permissions_manager):
         self._tasks: set[asyncio.Task] = set()
         self._broadcaster = broadcaster
         self._session_manager = session_manager
         self._note_store = note_store
+        self._approval_registry = approval_registry
+        self._permissions_manager = permissions_manager
 
-    def start_run(self,goal:str,session_id:str)->str:
+    def start_run(self,goal:str,session_id:str,writer)->str:
         bus = EventBus()
         run_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        file_writer = FileWriter(Path(f"/home/administrator/cc_learn/AemeathCode/run/events_{run_time}.ndjson"))
+        run_dir = get_data_dir() / "run"
+        run_dir.mkdir(parents=True, exist_ok=True)   # FileWriter/TraceWriter 用裸 open,不自建目录
+
+        file_writer = FileWriter(run_dir / f"events_{run_time}.ndjson")
         printer = EventLogger()
 
-        trace_writer = TraceWriter(Path(f"/home/administrator/cc_learn/AemeathCode/run/traces_{run_time}.ndjson"))
+        trace_writer = TraceWriter(run_dir / f"traces_{run_time}.ndjson")
 
         provider = TracingProvider(inner=AnthropicProvider(model = get_config().model,note_store=self._note_store),
                                    trace=trace_writer)
 
+        approver = Approver(writer=writer,registry=self._approval_registry)
 
         run_id = str(uuid.uuid4())
         self._session_manager.mark_active(session_id)
@@ -45,7 +51,7 @@ class Runner:
         self._session_manager.add_run(session_id, run_id)
         boundary = len(history)
 
-        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer,messages=history,tasks=runtime.tasks,note_store=self._note_store)
+        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer,messages=history,tasks=runtime.tasks,note_store=self._note_store,approver=approver,permission_manager=self._permissions_manager)
 
         agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus)
 

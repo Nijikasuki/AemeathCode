@@ -7,6 +7,7 @@
 注意:每次回车都是一个【独立的 run】,不携带上一轮的对话历史
 (跨轮会话记忆属于后续阶段)。
 """
+import asyncio
 from datetime import datetime
 
 from textual import work
@@ -94,6 +95,59 @@ class SessionPicker(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class PermissionPrompt(Vertical):
+    """内联权限请求:不覆盖整屏,直接嵌进对话流(#log)里,跟在那条工具调用下面,
+    像 Claude Code。用户选完,resolve 传进来的 Future,再把自己从对话里移除。
+    选项 id 就是 decision(allow_once/allow_always/deny);1/2/3 数字键 + ↑↓ Enter 都能选,Esc=deny。"""
+
+    BINDINGS = [
+        ("1", "pick('allow_once')", "允许一次"),
+        ("2", "pick('allow_always')", "总是允许"),
+        ("3", "pick('deny')", "拒绝"),
+        ("escape", "pick('deny')", "拒绝"),
+    ]
+
+    DEFAULT_CSS = """
+    PermissionPrompt {
+        height: auto;
+        border: round $warning;
+        padding: 0 1;
+        margin: 1 0;
+    }
+    PermissionPrompt #perm-head { color: $warning; }
+    PermissionPrompt #perm-detail { color: $text-muted; margin-bottom: 1; }
+    PermissionPrompt OptionList { height: auto; background: transparent; }
+    """
+
+    def __init__(self, ask: dict, future: "asyncio.Future[str]") -> None:
+        super().__init__()
+        self._ask = ask
+        self._future = future
+
+    def compose(self) -> ComposeResult:
+        tool = self._ask.get("tool_name", "")
+        detail = self._ask.get("detail", "")
+        yield Label(f"⏵ 权限请求 · 工具 [bold]{tool}[/bold]", id="perm-head")
+        yield Static(detail or "(无详情)", id="perm-detail")
+        yield OptionList(
+            Option("1. 允许一次", id="allow_once"),
+            Option("2. 总是允许(记住,不再询问)", id="allow_always"),
+            Option("3. 拒绝", id="deny"),
+            id="perm-options",
+        )
+
+    def on_mount(self) -> None:
+        self.query_one("#perm-options", OptionList).focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.action_pick(event.option.id)
+
+    def action_pick(self, decision: str) -> None:
+        if not self._future.done():
+            self._future.set_result(decision)
+        self.remove()   # 选完把自己从对话流里撤掉
+
+
 class AemeathApp(App):
     CSS = APP_CSS
     BINDINGS = [("ctrl+q", "quit", "退出")]
@@ -150,6 +204,7 @@ class AemeathApp(App):
             return
 
         client.on_event(self._on_event)
+        client.on_ask(self._prompt_permission)
         self._client = client
 
         # 读循环必须【先】并发跑起来:send_command 的响应正是靠它读到再唤醒 Future。
@@ -220,6 +275,18 @@ class AemeathApp(App):
 
         view.scroll_end(animate=False)
 
+
+    async def _prompt_permission(self, ask: dict) -> str:
+        # 内联:往对话区挂一个 PermissionPrompt(不覆盖整屏),await Future 等它被选中。
+        # 选中后 prompt 自己 set_result + remove;这里拿到 decision,顺手把焦点还给输入框。
+        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        view = self.query_one("#log", VerticalScroll)
+        await view.mount(PermissionPrompt(ask, future))
+        view.scroll_end(animate=False)
+        try:
+            return await future
+        finally:
+            self.query_one("#goal", Input).focus()
     # ---- 输入 ----
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
