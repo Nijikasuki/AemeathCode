@@ -24,5 +24,11 @@ def event_markup(event: dict) -> str:
             f" · cache {event.get('cache_read', 0)} · out {event.get('output_tokens', 0)}[/dim]"
         )
 
+    if etype == "context.compacted":
+        return (
+            f"[$accent]🗜 上下文已压缩[/$accent]"
+            f"  [dim]{event.get('before', 0)} → {event.get('after', 0)} 条[/dim]"
+        )
+
     # 兜底:没专门排版的事件类型,暗色显示一下类型名即可
     return f"[dim]{etype}[/dim]"

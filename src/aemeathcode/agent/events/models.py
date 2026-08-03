@@ -47,5 +47,27 @@ class LlmTokenEvent(BaseModel):
     ts: str = Field(default_factory=lambda: datetime.now().isoformat())
     run_id: str
 
+class ContextUsageEvent(BaseModel):
+    # 每次 chat 后推一发:当前上下文水位(used)/ 窗口(window),给前端画进度条
+    type: Literal["context.usage"] = "context.usage"
+    used: int
+    window: int
+    ts: str = Field(default_factory=lambda: datetime.now().isoformat())
+    run_id: str
+
+class CompactionStartedEvent(BaseModel):
+    # 压缩【开始】时推一发(await 概括之前):前端挂"正在压缩"指示器
+    type: Literal["context.compacting"] = "context.compacting"
+    ts: str = Field(default_factory=lambda: datetime.now().isoformat())
+    run_id: str
+
+class CompactionEvent(BaseModel):
+    # 压缩【完成】时推一发:压缩前后的消息条数,前端撤掉指示器 + 提示
+    type: Literal["context.compacted"] = "context.compacted"
+    before: int
+    after: int
+    ts: str = Field(default_factory=lambda: datetime.now().isoformat())
+    run_id: str
+
 if __name__ == "__main__":
     print(type(RunStartedEvent(goal="帮我看看",run_id="x").model_dump()))

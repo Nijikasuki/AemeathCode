@@ -7,10 +7,12 @@ import json
 from typing import Any
 
 from rich.markdown import Markdown
+from rich.markup import escape
 
 from textual.app import ComposeResult
+from textual.containers import Horizontal
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import Label, ProgressBar, Static
 
 
 def _preview(text: str, limit: int) -> str:
@@ -47,6 +49,25 @@ class LLMStreamBlock(Static):
             self.update(Markdown(self._text, code_theme="monokai"))
 
 
+class CompactionIndicator(Horizontal):
+    """压缩进行中的指示器 = 标签 + 不确定脉冲条。
+
+    压缩是一次不可分的 LLM 调用(概括),没有真实百分比,所以用 indeterminate
+    模式(total=None)的脉冲动画,像 Claude Code 的 "Compacting…" 提示。
+    压缩开始时挂上,完成时由 app 撤掉。
+    """
+
+    DEFAULT_CSS = """
+    CompactionIndicator { height: auto; padding: 0 2; margin: 1 0; }
+    CompactionIndicator > Label { color: $accent; margin-right: 2; width: auto; }
+    CompactionIndicator > ProgressBar { width: 1fr; }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Label("🗜 正在压缩上下文…")
+        yield ProgressBar(total=None, show_eta=False, show_percentage=False)
+
+
 class ToolCallBlock(Widget):
     """一次工具调用 = 一个可折叠 widget。
 
@@ -80,14 +101,14 @@ class ToolCallBlock(Widget):
     def _summary(self) -> str:
         line = (
             f"[dim]tool[/dim] [bold $secondary]{self._tool_name}[/bold $secondary]"
-            f"  [dim]{_preview(self._params_full, 60)}[/dim]"
+            f"  [dim]{escape(_preview(self._params_full, 60))}[/dim]"
         )
         if self._finished:
             color, status = ("$error", "failed") if self._is_error else ("$success", "done")
             hint = "  [dim](点击展开)[/dim]" if self._output else ""
             line += (
                 f"\n[dim]↳[/dim] [{color}]{status}[/{color}]"
-                f"  [dim]{_preview(self._output, 70)}  {self._elapsed_ms}ms[/dim]{hint}"
+                f"  [dim]{escape(_preview(self._output, 70))}  {self._elapsed_ms}ms[/dim]{hint}"
             )
         return line
 
@@ -106,7 +127,7 @@ class ToolCallBlock(Widget):
             self.remove_class("expanded")
         else:
             self.query_one(".detail", Static).update(
-                f"[dim]params:[/dim] {self._params_full}\n"
-                f"[dim]output:[/dim] {self._output}"
+                f"[dim]params:[/dim] {escape(self._params_full)}\n"
+                f"[dim]output:[/dim] {escape(self._output)}"
             )
             self.add_class("expanded")

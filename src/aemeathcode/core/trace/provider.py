@@ -12,6 +12,7 @@ class TracingProvider(LLMProvider):
     def __init__(self,inner:LLMProvider,trace:TraceWriter) -> None:
         self._inner = inner
         self._trace = trace
+        self.model = inner.model
 
     async def chat(self, messages, tool_schemas, bus: EventBus, run_id: str) -> LlmResponse:
         start = time.monotonic()
@@ -34,5 +35,9 @@ class TracingProvider(LLMProvider):
                                  status=status,
                                  error=error)
             self._trace.emit(record)
+
+    async def complete(self, system: str, messages: list) -> str:
+        # 透明转发(先不计时);辅助调用不走 bus/事件,tracing 以后想加再加。
+        return await self._inner.complete(system, messages)
 
 

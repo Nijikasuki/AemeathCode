@@ -8,6 +8,7 @@
 (跨轮会话记忆属于后续阶段)。
 """
 import asyncio
+import json
 from datetime import datetime
 
 from textual import work
@@ -18,11 +19,12 @@ from textual.suggester import SuggestFromList
 from textual.widgets import Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
+from aemeathcode.core.compact.budget import context_window
 from aemeathcode.core.config import get_config
 from aemeathcode.transport.socket_client import SocketClient
 from aemeathcode.tui.render import event_markup
 from aemeathcode.tui.theme import AEMEATH_THEME, APP_CSS, BANNER
-from aemeathcode.tui.widgets import LLMStreamBlock, ToolCallBlock
+from aemeathcode.tui.widgets import CompactionIndicator, LLMStreamBlock, ToolCallBlock
 
 # 流式增量事件(要拼接成一段),其余事件都是"一次成型的一行"
 STREAM_TYPES = {"llm.thinking", "llm.token"}
@@ -160,6 +162,13 @@ class AemeathApp(App):
         self._stream_type: str | None = None        # 当前在流哪一种
         # tool_use_id → (块, 开始时间);结果事件后到,靠它找回对应的块
         self._tools: dict[str, tuple[ToolCallBlock, str]] = {}
+        self._model: str = get_config().model                 # 顶部显示 + 查窗口用
+        self._window: int = context_window(self._model)       # 当前模型的上下文窗口
+        self._status_markup: str = "[dim]connecting…[/dim]"  # 状态段(ready/running/idle…)
+        self._ctx_used: int = 0                               # 当前水位条显示的 used(动画起点)
+        self._pending_compaction: bool = False               # 刚压缩过?下一次水位更新走下降动画
+        self._compaction_widget: CompactionIndicator | None = None  # 压缩进行中的指示器
+        self._ctx_markup: str = self._ctx_bar(0, self._window)  # 水位段,一开始就是 0%
 
     def compose(self) -> ComposeResult:
         yield Label("[bold]AemeathCode[/bold]  [dim]connecting…[/dim]", id="status")
@@ -179,8 +188,69 @@ class AemeathApp(App):
 
     # ---- 小工具 ----
 
+    def _render_status(self) -> None:
+        line = f"[bold]AemeathCode[/bold]  [dim]{self._model}[/dim]  {self._status_markup}"
+        if self._ctx_markup:
+            line += f"   {self._ctx_markup}"
+        self.query_one("#status", Label).update(line)
+
     def _set_status(self, markup: str) -> None:
-        self.query_one("#status", Label).update(f"[bold]AemeathCode[/bold]  {markup}")
+        self._status_markup = markup
+        self._render_status()
+
+    def _set_ctx(self, markup: str) -> None:
+        self._ctx_markup = markup
+        self._render_status()
+
+    @staticmethod
+    def _fmt_tokens(n: int) -> str:
+        """token 数变人话:1_180_000→1.2M,118_000→118k,3200→3.2k,500→500。"""
+        if n >= 1_000_000:
+            return f"{n / 1e6:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1e3:.1f}k" if n < 10_000 else f"{n / 1e3:.0f}k"
+        return str(n)
+
+    @classmethod
+    def _ctx_bar(cls, used: int, window: int) -> str:
+        """把水位 used/window 渲染成一根 10 格进度条 + 百分比 + 绝对 token 数,按占比变色。
+        1M 窗口下真实占用常不足 1%,光看百分比像没动,所以带上绝对值(如 9.0k/1M)。"""
+        pct = used / window if window else 0.0
+        pct = max(0.0, min(pct, 1.0))
+        filled = round(pct * 10)
+        bar = "▓" * filled + "░" * (10 - filled)
+        color = "$success" if pct < 0.6 else ("$warning" if pct < 0.85 else "$error")
+        return (
+            f"[dim]ctx[/dim] [{color}]{bar}[/{color}] "
+            f"[{color}]{pct * 100:.0f}%[/{color}] "
+            f"[dim]{cls._fmt_tokens(used)}/{cls._fmt_tokens(window)}[/dim]"
+        )
+
+    def _show_ctx(self, used: int) -> None:
+        """瞬时更新水位条(记住当前值,给动画当起点)。"""
+        self._ctx_used = used
+        self._set_ctx(self._ctx_bar(used, self._window))
+
+    def _remove_compaction_widget(self) -> None:
+        if self._compaction_widget is not None:
+            self._compaction_widget.remove()
+            self._compaction_widget = None
+
+    def _animate_ctx_to(self, target: int) -> None:
+        """压缩后水位下降:从当前值分帧滑到 target(~0.7s),让"掉下去"看得见。"""
+        start = self._ctx_used
+        if start == target:
+            self._show_ctx(target)
+            return
+        steps = 12
+        self._anim_step = 0
+
+        def tick() -> None:
+            self._anim_step += 1
+            cur = round(start + (target - start) * self._anim_step / steps)
+            self._show_ctx(cur)
+
+        self.set_interval(0.06, tick, repeat=steps)   # 12 帧 × 0.06s ≈ 0.7s,跑完自动停
 
     def _end_block(self) -> None:
         """当前流式段落定格(触发 Markdown 重渲染)。"""
@@ -232,8 +302,20 @@ class AemeathApp(App):
         self._set_status("[$error]disconnected[/$error]")
 
     async def _on_event(self, event: dict) -> None:
-        view = self.query_one("#log", VerticalScroll)
         etype = event.get("type")
+
+        # 水位事件:只更新顶部状态条,不往日志区刷屏(它每轮都来)
+        if etype == "context.usage":
+            self._window = event.get("window", self._window)   # 以 daemon 的窗口为准
+            used = event.get("used", 0)
+            if self._pending_compaction:
+                self._pending_compaction = False
+                self._animate_ctx_to(used)                     # 刚压缩过 → 平滑下降,看得见
+            else:
+                self._show_ctx(used)                           # 平时瞬时更新
+            return
+
+        view = self.query_one("#log", VerticalScroll)
 
         if etype in STREAM_TYPES:
             # 换段了(或刚开始)→ 上一段定格,新建一个块挂上去
@@ -266,11 +348,25 @@ class AemeathApp(App):
                     is_error=bool(event.get("is_error")),
                 )
 
+        elif etype == "context.compacting":
+            # 压缩开始:挂一个"正在压缩"指示器(脉冲条),压完再撤
+            self._end_block()
+            self._compaction_widget = CompactionIndicator()
+            await view.mount(self._compaction_widget)
+
+        elif etype == "context.compacted":
+            # 压缩完成:撤掉指示器,留下一行结果,并让下一次水位更新走下降动画
+            self._end_block()
+            self._remove_compaction_widget()
+            await view.mount(Static(event_markup(event), classes="event"))
+            self._pending_compaction = True
+
         else:
             self._end_block()
             if etype not in HIDDEN_TYPES:
                 await view.mount(Static(event_markup(event), classes="event"))
             if etype == "run.completed":
+                self._remove_compaction_widget()   # 兜底:压缩若异常中断,别让指示器卡住
                 self._set_status("[dim]idle[/dim]")
 
         view.scroll_end(animate=False)
@@ -337,6 +433,7 @@ class AemeathApp(App):
             created = await self._client.send_command("session.create", {"mode": "multi_turn"})
             self._session_id = created["session_id"]
             await view.remove_children()
+            self._show_ctx(0)   # 新会话上下文清零 → 0%
             await view.mount(Static(f"🧹 已开新会话 (session={self._session_id[:8]})", classes="sys"))
         elif text.startswith("/resume"):
             parts = text.split(maxsplit=1)
@@ -367,6 +464,9 @@ class AemeathApp(App):
             return
         self._session_id = resp["session_id"]
         await view.remove_children()
+        # resume 还没发问 → 没有实时 usage,先用历史本地估一把水位(问第一句后被真实值刷新)
+        used = sum(_estimate_msg_tokens(m) for m in resp["history"])
+        self._show_ctx(used)
         title = resp.get("title") or ""
         await view.mount(Static(f"⏪ 已恢复会话 (session={self._session_id[:8]}  {title})", classes="sys"))
         await self._replay_history(resp["history"], view)
@@ -395,6 +495,14 @@ class AemeathApp(App):
                 await view.mount(block)
                 block.append_token(content)
                 block.finalize()
+
+
+def _estimate_msg_tokens(msg: dict) -> int:
+    """resume 时本地粗估一条消息的 token(chars/4),和 compactor 同款启发式。
+    只用于展示近似水位,真实值由第一轮 chat 的 usage 事件刷新。"""
+    content = msg.get("content")
+    text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+    return len(text) // 4
 
 
 def _extract_text(content) -> str:

@@ -1,9 +1,11 @@
 
 from aemeathcode.agent.events.bus import EventBus
-from aemeathcode.agent.events.models import RunStartedEvent, RunFinishedEvent
+from aemeathcode.agent.events.models import RunStartedEvent, RunFinishedEvent, ContextUsageEvent, CompactionEvent, CompactionStartedEvent
 from aemeathcode.agent.llm.base import LLMProvider
 from aemeathcode.agent.tools import ToolRegistry
 from aemeathcode.agent.tools.invocation import invoke_tool
+from aemeathcode.core.compact.budget import should_compact, context_used, context_window
+from aemeathcode.core.compact.compact import Compactor
 from aemeathcode.core.context import ExecutionContext
 
 class Agent:
@@ -11,11 +13,13 @@ class Agent:
                  ctx: ExecutionContext,
                  provider: LLMProvider,
                  registry: ToolRegistry,
-                 bus: EventBus):
+                 bus: EventBus,
+                 compactor: Compactor):
         self.provider = provider
         self.registry = registry
         self.bus = bus
         self.ctx = ctx
+        self.compactor = compactor
 
     async def loop(self) -> None:
         await self.bus.publish(RunStartedEvent(goal=self.ctx.goal,
@@ -34,12 +38,26 @@ class Agent:
                 return None
 
             self.ctx.step+=1
+
+            if self.ctx.last_usage is not None and should_compact(usage=self.ctx.last_usage,model=self.provider.model):
+                before = len(self.ctx.messages)
+                await self.bus.publish(CompactionStartedEvent(run_id=self.ctx.run_id))
+                await self.compactor.compact(self.ctx)
+                await self.bus.publish(CompactionEvent(before=before,
+                                                       after=len(self.ctx.messages),
+                                                       run_id=self.ctx.run_id))
+
             resp = await self.provider.chat(messages=self.ctx.messages,
                                             tool_schemas=self.registry.tool_schemas(),
                                             bus=self.bus,
                                             run_id=self.ctx.run_id)
 
             self.ctx.token_add(resp)
+
+            if self.ctx.last_usage is not None:
+                await self.bus.publish(ContextUsageEvent(used=context_used(self.ctx.last_usage),
+                                                         window=context_window(self.provider.model),
+                                                         run_id=self.ctx.run_id))
 
             if resp.stop_reason == "end_turn":
                 blocks = []

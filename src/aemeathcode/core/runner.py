@@ -13,6 +13,8 @@ from aemeathcode.agent.loop import Agent
 from aemeathcode.core.context import ExecutionContext
 from aemeathcode.core.trace.provider import TracingProvider
 from aemeathcode.core.trace.writer import TraceWriter
+from aemeathcode.core.compact.compact import Compactor
+from aemeathcode.core.memory.loader import load_project_memory
 from aemeathcode.transport.approver import Approver
 
 
@@ -37,11 +39,13 @@ class Runner:
 
         trace_writer = TraceWriter(run_dir / f"traces_{run_time}.ndjson")
 
-        provider = TracingProvider(inner=AnthropicProvider(model = get_config().model,note_store=self._note_store),
+        provider = TracingProvider(inner=AnthropicProvider(model = get_config().model,
+                                                           note_store=self._note_store,
+                                                           project_memory=load_project_memory(get_data_dir())),
                                    trace=trace_writer)
 
         approver = Approver(writer=writer,registry=self._approval_registry)
-
+        compactor = Compactor(provider=provider)
         run_id = str(uuid.uuid4())
         self._session_manager.mark_active(session_id)
         history = self._session_manager.build_history(session_id)
@@ -49,22 +53,21 @@ class Runner:
         if not runtime.session.run_ids:  # 还没有任何 run = 首轮
             self._session_manager.set_title(session_id, goal.strip()[:30])
         self._session_manager.add_run(session_id, run_id)
-        boundary = len(history)
 
         ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer,messages=history,tasks=runtime.tasks,note_store=self._note_store,approver=approver,permission_manager=self._permissions_manager)
 
-        agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus)
+        agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus,compactor=compactor)
 
         bus.subscribe(file_writer.write)
         bus.subscribe(printer.handle)
         bus.subscribe(self._broadcaster.handle)
 
-        task = asyncio.create_task(self._run_guarded(agent, bus,session_id,boundary))
+        task = asyncio.create_task(self._run_guarded(agent, bus,session_id))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return run_id
 
-    async def _run_guarded(self,agent, bus,session_id,boundary):
+    async def _run_guarded(self,agent, bus,session_id):
 
         if agent.ctx.trace is not None:
             agent.ctx.trace.start()
@@ -74,7 +77,7 @@ class Runner:
             await bus.publish(RunFinishedEvent(status="error", run_id=agent.ctx.run_id, steps=0,content=f"错误:{e}",
                                                input_tokens=agent.ctx.total_input_tokens,output_tokens=agent.ctx.total_output_tokens,cache_read=agent.ctx.total_cache_read))
         finally:
-            increment = agent.ctx.messages[boundary:]
+            increment = agent.ctx.record
             increment = self._sanitize(increment)
             self._session_manager.append_run_messages(session_id=session_id,run_id=agent.ctx.run_id,increment=increment)
             self._session_manager.add_token(session_id=session_id,
