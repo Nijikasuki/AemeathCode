@@ -169,6 +169,7 @@ class AemeathApp(App):
         self._pending_compaction: bool = False               # 刚压缩过?下一次水位更新走下降动画
         self._compaction_widget: CompactionIndicator | None = None  # 压缩进行中的指示器
         self._ctx_markup: str = self._ctx_bar(0, self._window)  # 水位段,一开始就是 0%
+        self._top_run_id = None
 
     def compose(self) -> ComposeResult:
         yield Label("[bold]AemeathCode[/bold]  [dim]connecting…[/dim]", id="status")
@@ -365,7 +366,7 @@ class AemeathApp(App):
             self._end_block()
             if etype not in HIDDEN_TYPES:
                 await view.mount(Static(event_markup(event), classes="event"))
-            if etype == "run.completed":
+            if etype == "run.completed" and event.get("run_id") == self._top_run_id:
                 self._remove_compaction_widget()   # 兜底:压缩若异常中断,别让指示器卡住
                 self._set_status("[dim]idle[/dim]")
 
@@ -411,7 +412,8 @@ class AemeathApp(App):
 
         self._end_block()
         self._set_status("[$accent]running…[/$accent]")
-        await self._client.send_command("run", {"goal": text, "session_id": self._session_id})
+        ack = await self._client.send_command("run", {"goal": text, "session_id": self._session_id})
+        self._top_run_id = ack.get("run_id")
         view.scroll_end(animate=False)
 
     # ---- 斜杠命令(跟 CLI chat 同一套:检测 → 调对应 session.* 命令)----

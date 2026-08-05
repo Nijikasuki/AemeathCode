@@ -20,7 +20,7 @@ class NoteSaveTool(BaseTool):
     async def invoke(self,params,ctx)-> ToolResult:
         try:
             content=params["content"]
-            ctx.note_store.append(content)
+            ctx.services.note_store.append(content)
             return ToolResult(
                 content=f" 已记住:{content}",
                 is_error=False,

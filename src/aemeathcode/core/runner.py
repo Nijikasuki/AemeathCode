@@ -10,7 +10,7 @@ from aemeathcode.agent.llm.provider import AnthropicProvider
 from aemeathcode.agent.tools import registry
 from aemeathcode.core.config import get_config, get_data_dir
 from aemeathcode.agent.loop import Agent
-from aemeathcode.core.context import ExecutionContext
+from aemeathcode.core.context import ExecutionContext, RunServices
 from aemeathcode.core.trace.provider import TracingProvider
 from aemeathcode.core.trace.writer import TraceWriter
 from aemeathcode.core.compact.compact import Compactor
@@ -54,7 +54,8 @@ class Runner:
             self._session_manager.set_title(session_id, goal.strip()[:30])
         self._session_manager.add_run(session_id, run_id)
 
-        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer,messages=history,tasks=runtime.tasks,note_store=self._note_store,approver=approver,permission_manager=self._permissions_manager,provider=provider,compactor=compactor)
+        services = RunServices(note_store=self._note_store,permission_manager=self._permissions_manager,provider=provider,compactor=compactor,broadcaster=self._broadcaster,approver=approver,trace=trace_writer,writer=writer)
+        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,messages=history,tasks=runtime.tasks,services=services)
 
         agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus,compactor=compactor)
 
@@ -69,8 +70,8 @@ class Runner:
 
     async def _run_guarded(self,agent, bus,session_id):
 
-        if agent.ctx.trace is not None:
-            agent.ctx.trace.start()
+        if agent.ctx.services.trace is not None:
+            agent.ctx.services.trace.start()
         try:
             await agent.loop()
         except Exception as e:
@@ -85,8 +86,8 @@ class Runner:
                                             output_tokens=agent.ctx.total_output_tokens,
                                             cache_read=agent.ctx.total_cache_read)
             self._session_manager.mark_waiting(session_id=session_id)
-            if agent.ctx.trace is not None:
-                await agent.ctx.trace.stop()
+            if agent.ctx.services.trace is not None:
+                await agent.ctx.services.trace.stop()
 
     def _sanitize(self,increment:list[dict])->list[dict]:
         """

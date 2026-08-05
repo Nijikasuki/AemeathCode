@@ -28,7 +28,7 @@ async def _run(goal:str):
 
     async def on_event(event):  # 事件处理器
         renderer.feed(event)
-        if event.get("type") == "run.completed":
+        if event.get("type") == "run.completed" and event["run_id"]==ack["run_id"]:
             done.set()
 
     client.on_event(on_event)
@@ -124,7 +124,7 @@ async def _chat():
 
     async def on_event(event):
         renderer.feed(event)
-        if event.get("type") == "run.completed":
+        if event.get("type") == "run.completed" and event["run_id"]==ack["run_id"]:
             done.set()
 
     client.on_event(on_event)
@@ -184,7 +184,7 @@ async def _chat():
 
             # 普通输入 = 一轮对话
             done.clear()          # 先清旗,免得上一轮的 set 漏到这轮
-            await client.send_command("run", {"goal": text, "session_id": session_id})
+            ack = await client.send_command("run", {"goal": text, "session_id": session_id})
             await done.wait()     # 等这一轮 run.completed,再回去读下一句
     finally:
         loop_task.cancel()

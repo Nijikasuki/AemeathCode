@@ -27,7 +27,7 @@ async def invoke_tool(registry : ToolRegistry,
     elif missing:
         result = ToolResult(content=f"缺少必需参数: {', '.join(missing)}",is_error=True,error_type="schema_error")
     else:
-        perm = await ctx.permission_manager.check(tool=tool,params=tool_call.input,approver=ctx.approver,run_id=ctx.run_id)
+        perm = await ctx.services.permission_manager.check(tool=tool,params=tool_call.input,approver=ctx.services.approver,run_id=ctx.run_id)
         if not perm.allowed:
             result = ToolResult(content=f"权限被拒绝:{perm.reason}",is_error=True, error_type="permission_denied")
         else:
@@ -49,7 +49,7 @@ async def invoke_tool(registry : ToolRegistry,
                 error = f"运行出错{e}"
                 status = "error"
             finally:
-                if ctx.trace is not None:
+                if ctx.services.trace is not None:
                     duration_ms = (time.monotonic() - start) * 1000
                     record = TraceRecord(run_id=ctx.run_id,
                                          category="tool",
@@ -58,6 +58,6 @@ async def invoke_tool(registry : ToolRegistry,
                                          duration_ms=duration_ms,
                                          status=status,
                                          error=error)
-                    ctx.trace.emit(record)
+                    ctx.services.trace.emit(record)
     await bus.publish(ToolCallFinishedEvent(tool_use_id=tool_call.id,is_error=result.is_error,content=result.content,run_id=ctx.run_id))
     return result
