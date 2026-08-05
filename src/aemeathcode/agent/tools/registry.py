@@ -16,3 +16,16 @@ class ToolRegistry:
         for tool in self._tools.values():
             tools.append({"name": tool.name, "description": tool.description, "input_schema": tool.input_schema})
         return tools
+
+    def names(self) -> list[str]:
+        return list(self._tools.keys())
+
+    def subset(self,names: list[str])->"ToolRegistry":
+        registry = ToolRegistry()
+
+        for name in names:
+            tool = self.get(name)
+            if tool is not None:
+                registry.register(tool)
+
+        return registry

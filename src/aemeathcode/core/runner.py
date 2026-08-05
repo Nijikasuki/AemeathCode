@@ -54,7 +54,7 @@ class Runner:
             self._session_manager.set_title(session_id, goal.strip()[:30])
         self._session_manager.add_run(session_id, run_id)
 
-        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer,messages=history,tasks=runtime.tasks,note_store=self._note_store,approver=approver,permission_manager=self._permissions_manager)
+        ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,trace=trace_writer,messages=history,tasks=runtime.tasks,note_store=self._note_store,approver=approver,permission_manager=self._permissions_manager,provider=provider,compactor=compactor)
 
         agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus,compactor=compactor)
 

@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 
+from aemeathcode.agent.llm.base import LLMProvider
 from aemeathcode.agent.llm.types import LlmResponse, UsageStats
+from aemeathcode.core.compact.compact import Compactor
 from aemeathcode.core.memory.note import NoteStore
 from aemeathcode.core.permissions.manager import PermissionsManager
 from aemeathcode.core.task.manager import TaskManager
@@ -16,6 +18,8 @@ class ExecutionContext:
     note_store: NoteStore
     permission_manager: PermissionsManager
     messages: list[dict]
+    provider: LLMProvider
+    compactor: Compactor
     record: list[dict] = field(default_factory=list)
     reason: str|None = None
     status: str = "running"
@@ -26,6 +30,7 @@ class ExecutionContext:
     trace: TraceWriter | None = None
     approver: Approver | None = None
     last_usage: UsageStats | None = None
+
 
     def __post_init__(self):
         self.messages.append({"role": "user", "content": self.goal})

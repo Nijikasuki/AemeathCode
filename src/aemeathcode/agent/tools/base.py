@@ -13,6 +13,7 @@ class BaseTool(ABC):
     name:str
     description:str
     input_schema:dict
+    safety_timeout: float | None = 300
 
     @abstractmethod
     async def invoke(self, params,ctx:ExecutionContext) -> ToolResult:
