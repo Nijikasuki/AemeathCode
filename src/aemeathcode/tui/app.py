@@ -164,6 +164,7 @@ class AemeathApp(App):
         # tool_use_id → (块, 开始时间);结果事件后到,靠它找回对应的块
         self._tools: dict[str, tuple[ToolCallBlock, str]] = {}
         self._model: str = get_config().model                 # 顶部显示 + 查窗口用
+        self._show_thinking: bool = get_config().show_thinking  # UI 是否显示 thinking(config 开关)
         self._window: int = context_window(self._model)       # 当前模型的上下文窗口
         self._status_markup: str = "[dim]connecting…[/dim]"  # 状态段(ready/running/idle…)
         self._ctx_used: int = 0                               # 当前水位条显示的 used(动画起点)
@@ -348,6 +349,10 @@ class AemeathApp(App):
             collapsible = self._spawn_blocks.get(event.get("parent_tool_use_id"))
             if collapsible is not None:
                 self._sub_containers[event.get("run_id")] = collapsible
+            return
+
+        # thinking 显示开关:关了就直接丢掉 thinking 事件(daemon 照常发,只是 UI 不画)
+        if etype == "llm.thinking" and not self._show_thinking:
             return
 
         log = self.query_one("#log", VerticalScroll)   # 滚动始终针对主日志
