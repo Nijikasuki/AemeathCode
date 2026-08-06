@@ -59,8 +59,12 @@ class SpawnAgentTool(BaseTool):
 
             sub_agent = Agent(ctx=sub_ctx,provider=ctx.services.provider, registry=child_registry, bus=sub_bus,compactor=ctx.services.compactor)
 
-            ctx.services.broadcaster.subscribe(Subscriber(writer=ctx.services.writer, scope=f"run:{sub_run_id}", topics=["*"]))
-            await sub_agent.loop()
+            sub_subscriber = Subscriber(writer=ctx.services.writer, scope=f"run:{sub_run_id}", topics=["*"])
+            ctx.services.broadcaster.subscribe(sub_subscriber)
+            try:
+                await sub_agent.loop()
+            finally:
+                ctx.services.broadcaster.unsubscribe_with_subscriber(sub_subscriber=sub_subscriber)
 
             if sub_ctx.status == "success":
                 result = _final_text(sub_ctx.messages) or "子任务完成，但无文本输出"

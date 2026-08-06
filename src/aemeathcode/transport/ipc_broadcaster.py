@@ -23,6 +23,12 @@ class IpcEventBroadcaster:
                 self._subscribers.remove(subscriber)
                 break
 
+    def unsubscribe_with_subscriber(self, subscriber):
+        for i, s in enumerate(self._subscribers):
+            if s is subscriber:  # 就是我那一个对象
+                del self._subscribers[i]
+                return
+
     @staticmethod
     def _match(run_id, scope) -> bool:
         if scope == "global":
