@@ -31,13 +31,21 @@ def _final_text(messages: list[dict]) -> str:
 
 class SpawnAgentTool(BaseTool):
     name = 'spawn_agent'
-    description = '生成一个子agent独立完成一个子任务，只返回结论'
+    description = ('生成一个子 agent 独立完成一个子任务,只返回结论。'
+                  '派活时【尽量指定 agent 角色】以获得更专注/更安全的执行:'
+                  "审阅或找问题用 agent='reviewer'、拆解规划用 'planner'、动手执行用 'executor';"
+                  '实在不匹配任何角色再省略(走通用子 agent)。')
     input_schema = {
         "type": "object",
         "properties": {
             "goal": {
                 "type": "string",
                 "description": "派给子agent的子任务目标"
+            },
+            "agent": {
+                "type": "string",
+                "enum": ["reviewer", "planner", "executor"],
+                "description": "子agent以哪个角色跑:reviewer(审阅/挑问题,只读工具) / planner(拆解规划) / executor(动手执行)。按子任务性质选;不填=通用子agent"
             }
         },
         "required": ["goal"]
@@ -56,10 +64,28 @@ class SpawnAgentTool(BaseTool):
 
             # 状态各建(新 run_id/messages/tasks)、服务借父(services=ctx.services 整包共享)
             sub_ctx = ExecutionContext(goal=sub_goal,max_steps=ctx.max_steps,run_id=sub_run_id,messages=[],tasks=TaskManager(),services=ctx.services)
-            # 防递归:子 agent 拿"全部工具减 spawn_agent"的派生 registry,连 schema 都看不到自己,自然无法再 spawn
-            child_registry = registry.subset([n for n in registry.names() if n != self.name])
+            # profile(角色):给了就按角色造【专属 provider】(自己的 system_prompt + 模型),否则借父的
+            agent_name = params.get("agent")
+            profile = ctx.services.profile_store.get(agent_name) if agent_name else None
+            if profile is not None:
+                from aemeathcode.agent.llm.provider import AnthropicProvider
+                from aemeathcode.core.trace.provider import TracingProvider
+                from aemeathcode.core.memory.loader import load_project_memory
+                from aemeathcode.core.config import get_data_dir
+                sub_provider = TracingProvider(
+                    inner=AnthropicProvider(model=profile.model or ctx.services.provider.model,
+                                            note_store=ctx.services.note_store,
+                                            project_memory=load_project_memory(get_data_dir()),
+                                            system_prompt=profile.system_prompt),
+                    trace=ctx.services.trace)
+            else:
+                sub_provider = ctx.services.provider
 
-            sub_agent = Agent(ctx=sub_ctx,provider=ctx.services.provider, registry=child_registry, bus=sub_bus,compactor=ctx.services.compactor)
+            # 工具集:profile 指定的白名单,否则全部;两种都【强制去掉 spawn 自己】防递归
+            allowed = profile.tools if (profile and profile.tools is not None) else registry.names()
+            child_registry = registry.subset([n for n in allowed if n != self.name])
+
+            sub_agent = Agent(ctx=sub_ctx,provider=sub_provider, registry=child_registry, bus=sub_bus,compactor=ctx.services.compactor)
 
             sub_subscriber = Subscriber(writer=ctx.services.writer, scope=f"run:{sub_run_id}", topics=["*"])
             ctx.services.broadcaster.subscribe(sub_subscriber)

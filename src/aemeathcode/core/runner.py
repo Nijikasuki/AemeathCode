@@ -19,13 +19,14 @@ from aemeathcode.transport.approver import Approver
 
 
 class Runner:
-    def __init__(self,broadcaster,session_manager,note_store,approval_registry,permissions_manager):
+    def __init__(self,broadcaster,session_manager,note_store,approval_registry,permissions_manager,profile_store):
         self._tasks: set[asyncio.Task] = set()
         self._broadcaster = broadcaster
         self._session_manager = session_manager
         self._note_store = note_store
         self._approval_registry = approval_registry
         self._permissions_manager = permissions_manager
+        self._profile_store = profile_store
 
     def start_run(self,goal:str,session_id:str,writer)->str:
         bus = EventBus()
@@ -54,7 +55,8 @@ class Runner:
             self._session_manager.set_title(session_id, goal.strip()[:30])
         self._session_manager.add_run(session_id, run_id)
 
-        services = RunServices(note_store=self._note_store,permission_manager=self._permissions_manager,provider=provider,compactor=compactor,broadcaster=self._broadcaster,approver=approver,trace=trace_writer,writer=writer)
+        services = RunServices(note_store=self._note_store,permission_manager=self._permissions_manager,provider=provider,compactor=compactor,
+                               broadcaster=self._broadcaster,approver=approver,trace=trace_writer,writer=writer,profile_store=self._profile_store)
         ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,messages=history,tasks=runtime.tasks,services=services)
 
         agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus,compactor=compactor)

@@ -10,11 +10,12 @@ from aemeathcode.core.memory.note import NoteStore
 
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self,model:str,note_store:NoteStore,project_memory:str="") -> None:
+    def __init__(self,model:str,note_store:NoteStore,project_memory:str="",system_prompt:str=SYSTEM_PROMPT) -> None:
         self._client = AsyncAnthropic()
         self.model = model
         self._note_store = note_store
         self._project_memory = project_memory
+        self._system_prompt = system_prompt   # 默认主 agent prompt;子 agent 按 profile 传角色 prompt
 
     async def chat(self,
                    messages: list[dict[str, object]],
@@ -22,7 +23,7 @@ class AnthropicProvider(LLMProvider):
                    bus: EventBus,
                    run_id: str) -> LlmResponse:
         notes = self._note_store.load()
-        system = [{"type": "text","text": SYSTEM_PROMPT,"cache_control": {"type": "ephemeral"},}]
+        system = [{"type": "text","text": self._system_prompt,"cache_control": {"type": "ephemeral"},}]
         if self._project_memory:
             system.append({"type": "text","text": "# 项目记忆(AEMEATH.md)\n" + self._project_memory})
         if notes:
