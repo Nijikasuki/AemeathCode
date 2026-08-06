@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from aemeathcode.agent.llm.base import LLMProvider
 from aemeathcode.agent.llm.types import LlmResponse, UsageStats
 from aemeathcode.core.agents.loader import ProfileStore
+from aemeathcode.core.skills.loader import SkillStore
 from aemeathcode.core.compact.compact import Compactor
 from aemeathcode.core.memory.note import NoteStore
 from aemeathcode.core.permissions.manager import PermissionsManager
@@ -23,6 +24,7 @@ class RunServices:
     compactor: Compactor
     broadcaster: IpcEventBroadcaster
     profile_store: ProfileStore
+    skill_store: SkillStore
     approver: Approver | None = None
     trace: TraceWriter | None = None
     writer: StreamWriter | None = None   # 发起该 run 的客户端连接(反向审批 / 子 run 观测订阅用)

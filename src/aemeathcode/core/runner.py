@@ -19,7 +19,7 @@ from aemeathcode.transport.approver import Approver
 
 
 class Runner:
-    def __init__(self,broadcaster,session_manager,note_store,approval_registry,permissions_manager,profile_store):
+    def __init__(self,broadcaster,session_manager,note_store,approval_registry,permissions_manager,profile_store,skill_store):
         self._tasks: set[asyncio.Task] = set()
         self._broadcaster = broadcaster
         self._session_manager = session_manager
@@ -27,6 +27,7 @@ class Runner:
         self._approval_registry = approval_registry
         self._permissions_manager = permissions_manager
         self._profile_store = profile_store
+        self._skill_store = skill_store
 
     def start_run(self,goal:str,session_id:str,writer)->str:
         bus = EventBus()
@@ -42,7 +43,8 @@ class Runner:
 
         provider = TracingProvider(inner=AnthropicProvider(model = get_config().model,
                                                            note_store=self._note_store,
-                                                           project_memory=load_project_memory(get_data_dir())),
+                                                           project_memory=load_project_memory(get_data_dir()),
+                                                           skills_catalog=self._skill_store.catalog_text()),
                                    trace=trace_writer)
 
         approver = Approver(writer=writer,registry=self._approval_registry)
@@ -56,7 +58,7 @@ class Runner:
         self._session_manager.add_run(session_id, run_id)
 
         services = RunServices(note_store=self._note_store,permission_manager=self._permissions_manager,provider=provider,compactor=compactor,
-                               broadcaster=self._broadcaster,approver=approver,trace=trace_writer,writer=writer,profile_store=self._profile_store)
+                               broadcaster=self._broadcaster,approver=approver,trace=trace_writer,writer=writer,profile_store=self._profile_store,skill_store=self._skill_store)
         ctx = ExecutionContext(goal=goal,max_steps=get_config().max_steps,run_id=run_id,messages=history,tasks=runtime.tasks,services=services)
 
         agent = Agent(ctx=ctx,provider=provider, registry=registry, bus=bus,compactor=compactor)

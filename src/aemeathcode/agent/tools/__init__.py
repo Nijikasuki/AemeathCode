@@ -2,6 +2,7 @@ from aemeathcode.agent.tools.builtin.bash_tool import BashTool
 from aemeathcode.agent.tools.builtin.list_dir_tool import ListDirTool
 from aemeathcode.agent.tools.builtin.read_file_tool import ReadFileTool
 from aemeathcode.agent.tools.builtin.spawn_agent_tool import SpawnAgentTool
+from aemeathcode.agent.tools.builtin.use_skill_tool import UseSkillTool
 from aemeathcode.agent.tools.builtin.task_create_tool import TaskCreateTool
 from aemeathcode.agent.tools.builtin.task_get_tool import TaskGetTool
 from aemeathcode.agent.tools.builtin.task_list_tool import TaskListTool
@@ -22,3 +23,4 @@ registry.register(TaskListTool())
 registry.register(TaskUpdateTool())
 registry.register(NoteSaveTool())
 registry.register(SpawnAgentTool())
+registry.register(UseSkillTool())

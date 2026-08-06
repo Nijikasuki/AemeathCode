@@ -3,6 +3,7 @@ import logging
 import signal
 
 from aemeathcode.core.agents.loader import ProfileStore
+from aemeathcode.core.skills.loader import SkillStore
 from aemeathcode.core.config import get_config, get_data_dir
 from aemeathcode.core.logging_setup import setup_logging
 from aemeathcode.core.memory.note import NoteStore
@@ -27,7 +28,8 @@ approval_registry = ApprovalRegistry()
 permission_store = PermissionStore(DATA_DIR)
 permissions_manager = PermissionsManager(permission_store)
 profile_store = ProfileStore()
-runner = Runner(broadcaster,session_manager,note_store,approval_registry,permissions_manager,profile_store)
+skill_store = SkillStore(user_dir=DATA_DIR / "skills")   # 内置 + 用户自定义(.aemeath/skills/*.md)
+runner = Runner(broadcaster,session_manager,note_store,approval_registry,permissions_manager,profile_store,skill_store)
 
 async def ping_handler(ctx:RequestContext)->str:
     return "pong"

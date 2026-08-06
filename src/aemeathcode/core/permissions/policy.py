@@ -40,6 +40,7 @@ TOOL_POLICIES = {
     "task_get": ToolPolicy(default="allow"),
     "task_list": ToolPolicy(default="allow"),
     "task_update": ToolPolicy(default="allow"),
+    "use_skill": ToolPolicy(default="allow"),   # 只读加载本地 md 指令,无副作用
     "write_file": ToolPolicy(default="ask"),
     "bash": ToolPolicy(default="ask", deny=DANGER, allow=SAFE_CMDS),
 }
