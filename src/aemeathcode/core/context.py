@@ -45,6 +45,7 @@ class ExecutionContext:
     total_output_tokens: int = 0
     total_cache_read: int = 0
     last_usage: UsageStats | None = None
+    current_tool_use_id: str | None = None
 
     def __post_init__(self):
         self.messages.append({"role": "user", "content": self.goal})

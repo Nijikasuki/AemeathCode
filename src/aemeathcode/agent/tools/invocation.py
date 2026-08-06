@@ -35,6 +35,7 @@ async def invoke_tool(registry : ToolRegistry,
             ts_start = datetime.now().isoformat()
             status: Literal["ok", "error"] = "ok"
             error: str | None = None
+            ctx.current_tool_use_id = tool_call.id
             try:
                 if tool.safety_timeout is not None:
                     result = await asyncio.wait_for(tool.invoke(params=tool_call.input,ctx=ctx), timeout=tool.safety_timeout)

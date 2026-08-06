@@ -9,6 +9,7 @@
 """
 import asyncio
 import json
+import time
 from datetime import datetime
 
 from textual import work
@@ -16,7 +17,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
-from textual.widgets import Input, Label, OptionList, Static
+from textual.widgets import Collapsible, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
 from aemeathcode.core.compact.budget import context_window
@@ -170,6 +171,12 @@ class AemeathApp(App):
         self._compaction_widget: CompactionIndicator | None = None  # 压缩进行中的指示器
         self._ctx_markup: str = self._ctx_bar(0, self._window)  # 水位段,一开始就是 0%
         self._top_run_id = None
+        # 子 agent 嵌套渲染:spawn 的 tool_use_id → 折叠块;子 run_id → 折叠块(subagent.started 建立)
+        self._spawn_blocks: dict[str, Collapsible] = {}
+        self._sub_containers: dict[str, Collapsible] = {}
+        self._sess_in = self._sess_out = self._sess_cache = 0   # 本会话累计 token(状态栏右侧)
+        self._run_start: float | None = None                    # 顶层 run 开始时刻(monotonic),None=不在跑
+        self._running_subs: dict[Collapsible, float] = {}        # 正在跑的子 agent 折叠块 → 开始时刻
 
     def compose(self) -> ComposeResult:
         yield Label("[bold]AemeathCode[/bold]  [dim]connecting…[/dim]", id="status")
@@ -186,6 +193,7 @@ class AemeathApp(App):
         self.query_one("#log", VerticalScroll).mount(Static(BANNER, id="banner"))
         self.query_one("#goal", Input).focus()
         self.run_worker(self._connect)
+        self.set_interval(1.0, self._tick)   # 每秒刷新运行中计时器(主 run + 子 agent)
 
     # ---- 小工具 ----
 
@@ -193,6 +201,8 @@ class AemeathApp(App):
         line = f"[bold]AemeathCode[/bold]  [dim]{self._model}[/dim]  {self._status_markup}"
         if self._ctx_markup:
             line += f"   {self._ctx_markup}"
+        line += (f"   [dim]Σ {self._fmt_tokens(self._sess_in)}↑ "
+                 f"{self._fmt_tokens(self._sess_out)}↓ ⚡{self._fmt_tokens(self._sess_cache)}[/dim]")   # 累计 in↑/out↓/cache命中⚡(含子 agent)
         self.query_one("#status", Label).update(line)
 
     def _set_status(self, markup: str) -> None:
@@ -202,6 +212,15 @@ class AemeathApp(App):
     def _set_ctx(self, markup: str) -> None:
         self._ctx_markup = markup
         self._render_status()
+
+    def _tick(self) -> None:
+        """每秒跑一次:给正在运行的主 run / 子 agent 更新"已跑 N 秒"。都不在跑时啥也不做。"""
+        now = time.monotonic()
+        if self._run_start is not None:
+            self._set_status(f"[$accent]running… {int(now - self._run_start)}s[/$accent]")
+        for collapsible, start in self._running_subs.items():
+            base = getattr(collapsible, "_base_title", "🤖 子 agent")
+            collapsible.title = f"{base} · 运行中 {int(now - start)}s"
 
     @staticmethod
     def _fmt_tokens(n: int) -> str:
@@ -302,6 +321,13 @@ class AemeathApp(App):
         await self._client.run_event_loop()
         self._set_status("[$error]disconnected[/$error]")
 
+    def _container_for(self, event: dict):
+        """按事件的 run_id 决定 mount 到哪:子 agent 的事件进它折叠块的 body(嵌套缩进),否则进主日志。"""
+        collapsible = self._sub_containers.get(event.get("run_id"))
+        if collapsible is not None:
+            return collapsible.query_one(Collapsible.Contents)
+        return self.query_one("#log", VerticalScroll)
+
     async def _on_event(self, event: dict) -> None:
         etype = event.get("type")
 
@@ -316,7 +342,16 @@ class AemeathApp(App):
                 self._show_ctx(used)                           # 平时瞬时更新
             return
 
-        view = self.query_one("#log", VerticalScroll)
+        # 链接事件:纯粹给父子建映射,不渲染成行。用 parent_tool_use_id 找到 spawn 折叠块,
+        # 记下"这个子 run_id 的事件都往那个块里塞"。
+        if etype == "subagent.started":
+            collapsible = self._spawn_blocks.get(event.get("parent_tool_use_id"))
+            if collapsible is not None:
+                self._sub_containers[event.get("run_id")] = collapsible
+            return
+
+        log = self.query_one("#log", VerticalScroll)   # 滚动始终针对主日志
+        container = self._container_for(event)          # mount 目标:子事件进折叠块,否则主日志
 
         if etype in STREAM_TYPES:
             # 换段了(或刚开始)→ 上一段定格,新建一个块挂上去
@@ -327,50 +362,88 @@ class AemeathApp(App):
                     markdown=not thinking,               # 只有回答需要 Markdown
                     classes="thinking" if thinking else "answer",
                 )
-                await view.mount(self._block)
+                await container.mount(self._block)
                 self._stream_type = etype
             # 累加+更新每个流式事件都要做,不能包进上面的 if
             self._block.append_token(event.get("content", ""))
 
         elif etype == "tool.call_started":
             self._end_block()
-            block = ToolCallBlock(event.get("tool_name", ""), event.get("params", {}))
-            self._tools[event.get("tool_use_id", "")] = (block, event.get("ts", ""))
-            await view.mount(block)
+            if event.get("tool_name") == "spawn_agent":
+                # 子 agent:建一个可折叠块,它的所有事件之后都塞进这个块的 body(嵌套)
+                goal = str(event.get("params", {}).get("goal", ""))[:40]
+                base = f"🤖 子 agent · {goal}…"
+                collapsible = Collapsible(title=f"{base} · 运行中", collapsed=False, classes="subagent")
+                collapsible._spawn_start_ts = event.get("ts", "")   # 记开始时刻(ISO),子跑完算最终耗时
+                collapsible._base_title = base                       # 计时器每秒重写标题时用
+                self._spawn_blocks[event.get("tool_use_id", "")] = collapsible
+                self._running_subs[collapsible] = time.monotonic()   # 加入运行中计时
+                await container.mount(collapsible)
+            else:
+                block = ToolCallBlock(event.get("tool_name", ""), event.get("params", {}))
+                self._tools[event.get("tool_use_id", "")] = (block, event.get("ts", ""))
+                await container.mount(block)
 
         elif etype == "tool.call_finished":
-            # 结果事件后到:按 tool_use_id 找回当初那个块,补写结果
-            found = self._tools.pop(event.get("tool_use_id", ""), None)
-            if found is not None:
-                block, started_at = found
-                block.set_result(
-                    str(event.get("content", "")),
-                    _elapsed_ms(started_at, event.get("ts")),
-                    is_error=bool(event.get("is_error")),
-                )
+            tuid = event.get("tool_use_id", "")
+            if tuid in self._spawn_blocks:
+                # 子 agent 结束:折叠(子 transcript 收起,不与父转述重复)。
+                # 标题的"完成 · N步 · token · 耗时"由子的 run.completed 更新(见下方 else 分支);
+                # 这里只兜底:万一子没正常发 run.completed,别让标题永远停在"运行中"
+                collapsible = self._spawn_blocks[tuid]
+                if collapsible.title.endswith("运行中"):
+                    collapsible.title = "✓ 子 agent 完成"
+                collapsible.collapsed = True
+            else:
+                # 普通工具:按 tool_use_id 找回当初那个块,补写结果
+                found = self._tools.pop(tuid, None)
+                if found is not None:
+                    block, started_at = found
+                    block.set_result(
+                        str(event.get("content", "")),
+                        _elapsed_ms(started_at, event.get("ts")),
+                        is_error=bool(event.get("is_error")),
+                    )
 
         elif etype == "context.compacting":
             # 压缩开始:挂一个"正在压缩"指示器(脉冲条),压完再撤
             self._end_block()
             self._compaction_widget = CompactionIndicator()
-            await view.mount(self._compaction_widget)
+            await container.mount(self._compaction_widget)
 
         elif etype == "context.compacted":
             # 压缩完成:撤掉指示器,留下一行结果,并让下一次水位更新走下降动画
             self._end_block()
             self._remove_compaction_widget()
-            await view.mount(Static(event_markup(event), classes="event"))
+            await container.mount(Static(event_markup(event), classes="event"))
             self._pending_compaction = True
 
         else:
             self._end_block()
             if etype not in HIDDEN_TYPES:
-                await view.mount(Static(event_markup(event), classes="event"))
-            if etype == "run.completed" and event.get("run_id") == self._top_run_id:
-                self._remove_compaction_widget()   # 兜底:压缩若异常中断,别让指示器卡住
-                self._set_status("[dim]idle[/dim]")
+                await container.mount(Static(event_markup(event), classes="event"))
+            if etype == "run.completed":
+                rid = event.get("run_id")
+                if rid in self._sub_containers:
+                    # 子 agent 完成:把 步数 / token / 耗时 写进它折叠块的标题
+                    collapsible = self._sub_containers[rid]
+                    elapsed = _elapsed_ms(getattr(collapsible, "_spawn_start_ts", ""), event.get("ts"))
+                    collapsible.title = (
+                        f"✓ 子 agent · {event.get('steps', 0)} 步 · "
+                        f"in {event.get('input_tokens', 0)} · out {event.get('output_tokens', 0)} · {elapsed}ms"
+                    )
+                    self._running_subs.pop(collapsible, None)   # 停子 agent 计时
+                elif rid == self._top_run_id:
+                    self._run_start = None                      # 停主 run 计时
+                    self._remove_compaction_widget()   # 兜底:压缩若异常中断,别让指示器卡住
+                    self._set_status("[dim]idle[/dim]")
+                    # 会话累计 token:每个顶层 run 的总量(2b 修复后已含子 agent)累加 → 状态栏
+                    self._sess_in += event.get("input_tokens", 0)
+                    self._sess_out += event.get("output_tokens", 0)
+                    self._sess_cache += event.get("cache_read", 0)
+                    self._render_status()
 
-        view.scroll_end(animate=False)
+        log.scroll_end(animate=False)
 
 
     async def _prompt_permission(self, ask: dict) -> str:
@@ -414,6 +487,7 @@ class AemeathApp(App):
         self._set_status("[$accent]running…[/$accent]")
         ack = await self._client.send_command("run", {"goal": text, "session_id": self._session_id})
         self._top_run_id = ack.get("run_id")
+        self._run_start = time.monotonic()   # 开始主 run 计时
         view.scroll_end(animate=False)
 
     # ---- 斜杠命令(跟 CLI chat 同一套:检测 → 调对应 session.* 命令)----
@@ -436,6 +510,10 @@ class AemeathApp(App):
             self._session_id = created["session_id"]
             await view.remove_children()
             self._show_ctx(0)   # 新会话上下文清零 → 0%
+            self._sess_in = self._sess_out = self._sess_cache = 0   # 会话累计 token 归零
+            self._spawn_blocks.clear(); self._sub_containers.clear()   # 折叠块映射清干净,别留悬空引用
+            self._run_start = None; self._running_subs.clear()   # 计时器归零
+            self._render_status()
             await view.mount(Static(f"🧹 已开新会话 (session={self._session_id[:8]})", classes="sys"))
         elif text.startswith("/resume"):
             parts = text.split(maxsplit=1)
@@ -466,6 +544,14 @@ class AemeathApp(App):
             return
         self._session_id = resp["session_id"]
         await view.remove_children()
+        self._spawn_blocks.clear(); self._sub_containers.clear()
+        # 恢复会话:拉一次累计 usage 填状态栏(历史 run 的 token 总量)
+        usage = await self._client.send_command("session.usage", {"session_id": self._session_id})
+        if not isinstance(usage, str):
+            self._sess_in = usage.get("input_tokens", 0)
+            self._sess_out = usage.get("output_tokens", 0)
+            self._sess_cache = usage.get("cache_read", 0)
+            self._render_status()
         # resume 还没发问 → 没有实时 usage,先用历史本地估一把水位(问第一句后被真实值刷新)
         used = sum(_estimate_msg_tokens(m) for m in resp["history"])
         self._show_ctx(used)

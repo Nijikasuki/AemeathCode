@@ -12,6 +12,8 @@ class StreamRenderer:
 
     def feed(self, event):
         t = event.get("type")
+        if t == "subagent.started":
+            return  # 纯链接事件,给 TUI 建父子映射用;CLI 不做嵌套,直接忽略
         if t in STREAM_TYPES:
             self._feed_stream(event,t)
         else:

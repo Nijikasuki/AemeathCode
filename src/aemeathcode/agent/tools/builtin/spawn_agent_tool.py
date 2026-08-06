@@ -5,6 +5,7 @@ from aemeathcode.agent.events.bus import EventBus
 from aemeathcode.core.context import ExecutionContext
 from aemeathcode.core.task.manager import TaskManager
 from aemeathcode.transport.ipc_broadcaster import Subscriber
+from aemeathcode.agent.events.models import SubAgentStartedEvent
 
 def _final_text(messages: list[dict]) -> str:
     """从后往前找最近一条 assistant 消息,抽出纯文本当子 agent 的结论。
@@ -47,6 +48,7 @@ class SpawnAgentTool(BaseTool):
         from aemeathcode.agent.loop import Agent
         from aemeathcode.agent.tools import registry
         try:
+            parent_tool_use_id = ctx.current_tool_use_id
             sub_goal = params.get("goal")
             sub_run_id = str(uuid.uuid4())
             sub_bus = EventBus()
@@ -61,10 +63,16 @@ class SpawnAgentTool(BaseTool):
 
             sub_subscriber = Subscriber(writer=ctx.services.writer, scope=f"run:{sub_run_id}", topics=["*"])
             ctx.services.broadcaster.subscribe(sub_subscriber)
+            await sub_bus.publish(SubAgentStartedEvent(parent_tool_use_id=parent_tool_use_id, run_id=sub_run_id))
             try:
                 await sub_agent.loop()
             finally:
-                ctx.services.broadcaster.unsubscribe_with_subscriber(sub_subscriber=sub_subscriber)
+                ctx.services.broadcaster.unsubscribe_with_subscriber(sub_subscriber)
+
+            # 把子 agent 的 token 消耗折回父 ctx(否则子的 LLM 开销凭空蒸发,父 run 和会话都少算)
+            ctx.total_input_tokens += sub_ctx.total_input_tokens
+            ctx.total_output_tokens += sub_ctx.total_output_tokens
+            ctx.total_cache_read += sub_ctx.total_cache_read
 
             if sub_ctx.status == "success":
                 result = _final_text(sub_ctx.messages) or "子任务完成，但无文本输出"

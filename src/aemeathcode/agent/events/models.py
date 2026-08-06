@@ -69,5 +69,8 @@ class CompactionEvent(BaseModel):
     ts: str = Field(default_factory=lambda: datetime.now().isoformat())
     run_id: str
 
-if __name__ == "__main__":
-    print(type(RunStartedEvent(goal="帮我看看",run_id="x").model_dump()))
+class SubAgentStartedEvent(BaseModel):
+    type: Literal["subagent.started"] = "subagent.started"
+    parent_tool_use_id: str
+    run_id: str
+    ts: str = Field(default_factory=lambda: datetime.now().isoformat())

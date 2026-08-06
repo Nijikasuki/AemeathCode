@@ -50,6 +50,9 @@ Screen { background: $background; }
 }
 #goal:focus { border: round $primary; }
 
+/* 子 agent 折叠块:细框包住,把子过程收拢在里面 */
+Collapsible.subagent { border: round $surface-lighten-2; margin: 1 0; }
+
 Static { padding: 0; }
 
 #banner { height: auto; padding: 0 2 1 2; }

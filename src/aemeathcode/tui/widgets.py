@@ -38,7 +38,8 @@ class LLMStreamBlock(Static):
         if self._finalized:
             return
         self._text += token          # ① 攒出完整文本
-        self.update(self._text)      # ② 整体替换 = 打字机
+        # escape:流式文本是模型原始输出,可能含 [..] 被 Rich 当标记解析而崩(如子 agent 回显代码里的标记串)
+        self.update(escape(self._text))   # ② 整体替换 = 打字机
 
     def finalize(self) -> None:
         """段落结束:回答块重渲染成 Markdown,思考块保持朴素。"""

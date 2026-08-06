@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     # 只为类型标注,运行时不 import → 断开 context→manager→tools.base→context 的循环
     from aemeathcode.agent.tools.base import BaseTool
 
-_DETAIL_MAX = 80   # 给人看的审批详情截断上限,防超长命令/路径把提示框撑爆
+_DETAIL_MAX = 500   # 给人看的审批详情截断上限(放宽:命令要看全才好审批;仍留个上限防病态超长)
 
 
 @dataclass
