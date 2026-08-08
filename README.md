@@ -13,6 +13,8 @@
 [![MCP](https://img.shields.io/badge/MCP-client-orange)](https://modelcontextprotocol.io/)
 [![CI](https://github.com/Nijikasuki/AemeathCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Nijikasuki/AemeathCode/actions/workflows/ci.yml)
 
+**简体中文** · [English](./README_EN.md)
+
 </div>
 
 > AemeathCode 把「守护进程 + 多路复用协议 + ReAct Agent」这套终端 Coding Agent 的核心机制,
