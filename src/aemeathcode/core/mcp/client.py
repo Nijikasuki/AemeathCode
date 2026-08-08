@@ -4,6 +4,8 @@ import uuid
 
 from aemeathcode.core.mcp.framing import read_frame, write_frame
 
+_REQUEST_TIMEOUT = 60   # 单个请求等响应上限(秒):server 挂死时别让 _send 永久卡住(补参考 Tier1)
+
 
 class MCPClient:
     def __init__(self,command: list[str]):
@@ -41,7 +43,10 @@ class MCPClient:
         await write_frame(self._proc.stdin, {
             "jsonrpc": "2.0", "id": req_id, "method": method, "params": params or {},
         })
-        return await fut
+        try:
+            return await asyncio.wait_for(fut, timeout=_REQUEST_TIMEOUT)
+        finally:
+            self._pending.pop(req_id, None)   # 超时/正常都摘掉挂单;晚到的响应 reader loop pop 到 None 自然跳过
 
     async def _notify(self, method: str, params: dict | None = None):
         """通知:没 id、不挂 Future、不等回应(单向信号)。"""
