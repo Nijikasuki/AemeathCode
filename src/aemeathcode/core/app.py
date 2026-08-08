@@ -132,7 +132,18 @@ async def main():
     config = get_config()
     setup_logging(config)
     server = SocketServer(host=config.host,port=config.port,broadcaster=broadcaster,approval_registry=approval_registry)
+
+    # 提前建关闭旗:好让 shutdown_handler 闭包引用它。`aemeath stop` 和 SIGINT/SIGTERM
+    # 走同一条优雅关闭路径 —— 客户端发 shutdown = 远程按下这个旗。
+    shutdown = asyncio.Event()
+
+    async def shutdown_handler(ctx:RequestContext)->str:
+        logger.info("收到 shutdown 请求,准备优雅关闭")
+        shutdown.set()
+        return "shutting down"
+
     server.register(method="ping",handler=ping_handler)
+    server.register(method="shutdown",handler=shutdown_handler)
     server.register(method="run",handler=run_handler)
     server.register(method="watch",handler=watch_handler)
     server.register(method="session.create",handler=session_create_handler)
@@ -145,7 +156,6 @@ async def main():
     logger.info("listening on %s", addr)
 
     loop = asyncio.get_running_loop()
-    shutdown = asyncio.Event()
     loop.add_signal_handler(signal.SIGINT, shutdown.set)
     loop.add_signal_handler(signal.SIGTERM, shutdown.set)
 

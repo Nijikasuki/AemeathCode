@@ -5,13 +5,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from aemeathcode.transport.socket_client import SocketClient
+from aemeathcode.transport.socket_client import SocketClient, IpcError
 from aemeathcode.core.app import main as app_main
 from aemeathcode.cli.stream_renderer import StreamRenderer
+from aemeathcode.cli.bootstrap import ensure_daemon, _probe
+from aemeathcode.core.config import get_address
 
 
 async def _ping():
-    client = SocketClient("127.0.0.1", 9999)
+    client = SocketClient(*get_address())
     await client.connect()
     loop_task = asyncio.create_task(client.run_event_loop())  # 分拣室后台跑
     pong = await client.send_command("ping", {})
@@ -20,7 +22,8 @@ async def _ping():
     await client.close()
 
 async def _run(goal:str):
-    client = SocketClient("127.0.0.1", 9999)
+    await ensure_daemon()       # 没 daemon 就自动拉起,连接前先确保它在
+    client = SocketClient(*get_address())
     await client.connect()
 
     done = asyncio.Event()
@@ -116,7 +119,8 @@ def _replay_history(history):
 
 
 async def _chat():
-    client = SocketClient("127.0.0.1", 9999)
+    await ensure_daemon()       # 没 daemon 就自动拉起,连接前先确保它在
+    client = SocketClient(*get_address())
     await client.connect()
 
     done = asyncio.Event()
@@ -192,7 +196,8 @@ async def _chat():
         print("再见 👋")
 
 async def _watch(scope:str, topics:list[str]):
-    client = SocketClient("127.0.0.1", 9999)
+    await ensure_daemon()       # 没 daemon 就自动拉起,连接前先确保它在
+    client = SocketClient(*get_address())
     await client.connect()
     renderer = StreamRenderer()
 
@@ -204,6 +209,35 @@ async def _watch(scope:str, topics:list[str]):
     ack = await client.send_command("watch", {"scope": scope, "topics": topics})
     print(f"观察模式已启动,scope={ack["subscribed"]}")
     await loop_task
+
+
+async def _stop():
+    """请求 daemon 优雅关闭:探活→没有就直说→有就连上发 shutdown。
+
+    daemon 关闭时连接会断,send_command 的响应可能收不到(读循环里挂起的 future 被
+    置成 ConnectionError)—— 那是预期的,吞掉当成功。"""
+    if not await _probe():
+        print("daemon 未在运行")
+        return
+    client = SocketClient(*get_address())
+    await client.connect()
+    loop_task = asyncio.create_task(client.run_event_loop())
+    ok = True
+    try:
+        await client.send_command("shutdown", {})   # 正常返回 "shutting down" = 成功
+    except ConnectionError:
+        pass          # 连接随 daemon 关闭而断,收不到回执 —— 也是成功
+    except IpcError as e:
+        ok = False    # 收到错误响应(如老 daemon 没有 shutdown handler)= daemon 拒绝了
+        print(f"关闭失败:{e}")
+    loop_task.cancel()
+    try:
+        await client.close()
+    except Exception:
+        pass
+    if ok:
+        print("🛑 已请求 daemon 关闭")
+
 
 def cmd_ping(args):
     asyncio.run(_ping())
@@ -221,9 +255,14 @@ def cmd_watch(args):
     asyncio.run(_watch(args.scope, args.topics))
 
 def cmd_tui(args):
+    # 进 textual 前先确保 daemon 在(textual 会自建事件循环,这里先跑个短的把 daemon 拉起)
+    asyncio.run(ensure_daemon())
     # 延迟导入:只有真进 TUI 才加载 textual,别的子命令不受影响
     from aemeathcode.tui.app import run as run_tui
     run_tui()
+
+def cmd_stop(args):
+    asyncio.run(_stop())
 
 def cmd_trace(args):
     # trace 不连 daemon,纯读本地文件,所以是同步的,不用 asyncio.run
@@ -297,6 +336,9 @@ def main():
 
     p_ping = subparsers.add_parser("ping")
     p_ping.set_defaults(func=cmd_ping)
+
+    p_stop = subparsers.add_parser("stop")   # 手动关闭后台 daemon(混合生命周期:退出不自动关)
+    p_stop.set_defaults(func=cmd_stop)
 
     p_watch = subparsers.add_parser('watch')
     p_watch.add_argument("--scope", default="global")
