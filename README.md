@@ -4,7 +4,7 @@
 
 # AemeathCode
 
-**一个从零手搓的 mini Claude Code —— 既是能跑的终端 AI Agent,也是一趟看得见的系统工程学习历程。**
+**一个从零手搓的 Coding Agent —— 既是能跑的终端 AI Agent,也是一趟看得见的系统工程学习历程。**
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
@@ -15,7 +15,7 @@
 
 </div>
 
-> AemeathCode 把「守护进程 + 多路复用协议 + ReAct Agent」这套 Claude Code 的核心机制,
+> AemeathCode 把「守护进程 + 多路复用协议 + ReAct Agent」这套终端 Coding Agent 的核心机制,
 > 用纯 Python + asyncio 一层一层从零实现了一遍。它不是缝合库,而是 S0→S7 八个阶段
 > 逐步推出来的:先有能通信的进程,再有会用工具的循环,再有记忆、权限、压缩、子 agent、MCP。
 
