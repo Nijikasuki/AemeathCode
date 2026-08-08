@@ -21,3 +21,13 @@ build-backend = "hatchling.build"
 # 告诉 hatchling 包的源码在 src/aemeathcode 下
 [tool.hatch.build.targets.wheel]
 packages = ["src/aemeathcode"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"     # async 测试函数自动当 asyncio 跑,不用每个都 @pytest.mark.asyncio
+testpaths = ["tests"]     # 从这里递归找 test_*.py
