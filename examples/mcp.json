@@ -1,0 +1,10 @@
+[
+  {
+    "name": "github",
+    "command": ["npx", "-y", "@modelcontextprotocol/server-github"]
+  },
+  {
+    "name": "filesystem",
+    "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/your/allowed/dir"]
+  }
+]
