@@ -11,7 +11,7 @@
 [![Built with asyncio](https://img.shields.io/badge/built%20with-asyncio-blue)](https://docs.python.org/3/library/asyncio.html)
 [![TUI: Textual](https://img.shields.io/badge/TUI-Textual-5A5AFF)](https://textual.textualize.io/)
 [![MCP](https://img.shields.io/badge/MCP-client-orange)](https://modelcontextprotocol.io/)
-[![Tests](https://img.shields.io/badge/tests-54%20passing-brightgreen)](./tests)
+[![CI](https://github.com/Nijikasuki/AemeathCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Nijikasuki/AemeathCode/actions/workflows/ci.yml)
 
 </div>
 
