@@ -1,6 +1,8 @@
 <div align="center">
 
-<h1>AemeathCode&nbsp;<img src="assets/mascot.gif" width="80" align="center" alt="AemeathCode 吉祥物"></h1>
+<img src="assets/mascot.gif" width="120" alt="AemeathCode 吉祥物">
+
+# AemeathCode
 
 **一个从零手搓的 mini Claude Code —— 既是能跑的终端 AI Agent,也是一趟看得见的系统工程学习历程。**
 
