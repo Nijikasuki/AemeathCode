@@ -1,9 +1,14 @@
 import asyncio
 import logging
 import signal
+import sys
 
 from aemeathcode.core.agents.loader import ProfileStore
 from aemeathcode.core.skills.loader import SkillStore
+from aemeathcode.agent.tools import registry
+from aemeathcode.core.mcp.client import MCPClient
+from aemeathcode.core.mcp.tool import MCPTool
+from aemeathcode.core.mcp.config import load_servers
 from aemeathcode.core.config import get_config, get_data_dir
 from aemeathcode.core.logging_setup import setup_logging
 from aemeathcode.core.memory.note import NoteStore
@@ -30,6 +35,12 @@ permissions_manager = PermissionsManager(permission_store)
 profile_store = ProfileStore()
 skill_store = SkillStore(user_dir=DATA_DIR / "skills")   # 内置 + 用户自定义(.aemeath/skills/*.md)
 runner = Runner(broadcaster,session_manager,note_store,approval_registry,permissions_manager,profile_store,skill_store)
+
+# 内置默认 MCP server(测试用);用户加的走 .aemeath/mcp.json(aemeath mcp add)
+BUILTIN_MCP = [
+    {"name": "test", "command": [sys.executable, "-m", "aemeathcode.core.mcp.server"]},
+]
+mcp_status = []   # 启动连接的结果:[{name, connected, tools:[...]}],给 mcp.list handler 读(/mcp 展示)
 
 async def ping_handler(ctx:RequestContext)->str:
     return "pong"
@@ -92,6 +103,31 @@ async def session_usage_handler(ctx:RequestContext)->dict|str:
     }
 
 
+async def mcp_list_handler(ctx:RequestContext)->dict:
+    return {"servers": mcp_status}
+
+
+async def connect_mcp_servers(mcp_clients: list) -> None:
+    """后台逐个连 MCP server + 注册工具。单个失败只记状态、不影响其它。
+    shutdown 时被 cancel:会在某个 await 处抛 CancelledError 退出——它不是 Exception,
+    不会被下面的 except 吞掉,正好中断连接。"""
+    for spec in BUILTIN_MCP + load_servers():
+        try:
+            client = MCPClient(spec["command"])
+            await client.start()
+            await client.initialize()
+            tool_defs = await client.list_tools()
+            for tool_def in tool_defs:
+                registry.register(MCPTool(client, tool_def))
+            mcp_clients.append(client)
+            mcp_status.append({"name": spec["name"], "connected": True,
+                               "tools": [d["name"] for d in tool_defs]})
+            logger.info("MCP %s 已连接,注册 %d 个工具", spec["name"], len(tool_defs))
+        except Exception as e:
+            mcp_status.append({"name": spec.get("name"), "connected": False, "tools": [], "error": str(e)})
+            logger.warning("MCP %s 连接失败,跳过: %s", spec.get("name"), e)
+
+
 async def main():
     config = get_config()
     setup_logging(config)
@@ -103,6 +139,7 @@ async def main():
     server.register(method="session.list",handler=session_list_handler)
     server.register(method="session.resume",handler=session_resume_handler)
     server.register(method="session.usage",handler=session_usage_handler)
+    server.register(method="mcp.list",handler=mcp_list_handler)
 
     addr = await server.start()
     logger.info("listening on %s", addr)
@@ -112,8 +149,16 @@ async def main():
     loop.add_signal_handler(signal.SIGINT, shutdown.set)
     loop.add_signal_handler(signal.SIGTERM, shutdown.set)
 
+    # MCP 丢后台连:server 已在监听、signal 已就位,main 直接到 shutdown.wait;
+    # 后台边连边把工具注册进 registry(事件循环并发,不挡 TUI;工具渐进出现)。
+    mcp_clients = []
+    mcp_task = asyncio.create_task(connect_mcp_servers(mcp_clients))
+
     await shutdown.wait()      # ← 平时就停在这,等信号
-    await server.stop()        # ← 收到信号才往下,优雅关闭
+    mcp_task.cancel()          # ← 若还在后台连,取消它
+    for client in mcp_clients:
+        await client.stop()    # ← 收已连上的 MCP 子进程
+    await server.stop()        # ← 再优雅关闭 socket server
 
 def run():
     asyncio.run(main())

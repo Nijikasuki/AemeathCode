@@ -185,7 +185,7 @@ class AemeathApp(App):
         yield Input(
             placeholder="输入目标回车执行  ·  / 命令(灰字提示,→ 补全)  ·  Ctrl+Q 退出",
             id="goal",
-            suggester=SuggestFromList(["/sessions", "/resume", "/clear", "/usage", "/exit"], case_sensitive=False),
+            suggester=SuggestFromList(["/sessions", "/resume", "/clear", "/usage", "/mcp", "/exit"], case_sensitive=False),
         )
 
     def on_mount(self) -> None:
@@ -510,6 +510,9 @@ class AemeathApp(App):
                     f"📊 本会话累计 token:输入 {resp['input_tokens']} · "
                     f"输出 {resp['output_tokens']} · 缓存读 {resp['cache_read']}",
                     classes="sys"))
+        elif text == "/mcp":
+            resp = await self._client.send_command("mcp.list", {})
+            await self._show_mcp(resp["servers"], view)
         elif text == "/clear":
             created = await self._client.send_command("session.create", {"mode": "multi_turn"})
             self._session_id = created["session_id"]
@@ -573,6 +576,21 @@ class AemeathApp(App):
             updated = (s.get("updated_at") or "")[:19]
             title = s.get("title") or "(无标题)"
             lines.append(f"  {s.get('id')}  {updated}  {title}")   # 完整 id,方便复制去 /resume
+        await view.mount(Static("\n".join(lines), classes="sys"))
+
+    async def _show_mcp(self, servers: list, view: VerticalScroll) -> None:
+        if not servers:
+            await view.mount(Static("(没有已连接的 MCP server)", classes="sys"))
+            return
+        lines = ["MCP server:"]
+        for s in servers:
+            mark = "✓" if s.get("connected") else "✗"
+            n = len(s.get("tools", []))
+            lines.append(f"  {mark} {s.get('name')}  ({n} 个工具)")
+            for t in s.get("tools", []):
+                lines.append(f"      · {t}")
+            if not s.get("connected") and s.get("error"):
+                lines.append(f"      连接失败:{s['error']}")
         await view.mount(Static("\n".join(lines), classes="sys"))
 
     async def _replay_history(self, history: list, view: VerticalScroll) -> None:

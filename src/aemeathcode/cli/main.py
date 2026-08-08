@@ -268,6 +268,17 @@ def cmd_trace(args):
     print(f"  工具  {tool_n} 次   {tool_total:>9.1f}ms")
     print(f"  总计          {llm_total + tool_total:>9.1f}ms")
 
+def cmd_mcp_add(args):
+    from aemeathcode.core.mcp.config import add_server
+    if not args.command:
+        print("用法:aemeath mcp add <name> <命令...>"
+              "(如 aemeath mcp add github npx -y @modelcontextprotocol/server-github)")
+        return
+    add_server(args.name, args.command)
+    print(f"已添加 MCP server '{args.name}':{' '.join(args.command)}")
+    print("重启 aemeath core 生效")
+
+
 def main():
     parser = argparse.ArgumentParser(prog='aemeath')
     # 不传子命令时默认进 TUI(类似 claude code:敲 aemeath 直接进界面)
@@ -297,6 +308,14 @@ def main():
 
     p_trace = subparsers.add_parser('trace')  # 读最新 trace 文件,打印时间线
     p_trace.set_defaults(func=cmd_trace)
+
+    p_mcp = subparsers.add_parser('mcp')       # 管理 MCP server
+    p_mcp.set_defaults(func=lambda a: print("用法:aemeath mcp add <name> <命令...>"))
+    mcp_sub = p_mcp.add_subparsers(dest="mcp_command")
+    p_mcp_add = mcp_sub.add_parser('add')      # aemeath mcp add <name> <命令...>
+    p_mcp_add.add_argument("name")
+    p_mcp_add.add_argument("command", nargs=argparse.REMAINDER)  # 剩下的全当命令(含 -y 这种 flag)
+    p_mcp_add.set_defaults(func=cmd_mcp_add)
 
     args = parser.parse_args()
     try:
