@@ -8,6 +8,13 @@
 # 学习历程存档(S0–S7 的详细日志,从 CLAUDE.md 拆出来的私人笔记)
 NOTES.md
 
+# 设计工作材料:设计文档含角色分析与个人品味判断;截图是【旧界面】的工作照,
+# 重设计完就过期,而 git 历史只增不减(且 pipx install git+URL 会连历史一起 clone)。
+# 重设计完成后,挑 1-2 张漂亮的新截图放 assets/ 给 README —— 那才该进仓库。
+docs/design/
+# 角色立绘:只给设计文档当参考,公开仓库不需要
+assets/character.png
+
 # Python
 __pycache__/
 *.py[cod]

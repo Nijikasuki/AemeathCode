@@ -22,10 +22,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/aemeathcode"]
 
-# sdist 默认会把仓库里没被 .gitignore 的文件全打进去 —— assets/ 里的 GIF 有 4.3MB,
-# 那是 README 在 GitHub 上的门面,装包的人一个字节都用不到。排掉。
+# sdist 默认会把仓库里没被 .gitignore 的文件全打进去 —— assets/ 的 GIF 有 4.3MB、
+# docs/ 里是设计截图,都是 GitHub 上的门面/工作材料,装包的人一个字节都用不到。排掉。
 [tool.hatch.build.targets.sdist]
-exclude = ["assets"]
+exclude = ["assets", "docs"]
 
 [dependency-groups]
 dev = [
