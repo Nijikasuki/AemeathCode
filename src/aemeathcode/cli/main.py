@@ -8,7 +8,7 @@ from pathlib import Path
 from aemeathcode.transport.socket_client import SocketClient, IpcError
 from aemeathcode.core.app import main as app_main
 from aemeathcode.cli.stream_renderer import StreamRenderer
-from aemeathcode.cli.bootstrap import ensure_daemon, _probe
+from aemeathcode.cli.bootstrap import ensure_daemon, restart_daemon, request_shutdown, _probe
 from aemeathcode.core.config import get_address
 
 
@@ -212,31 +212,16 @@ async def _watch(scope:str, topics:list[str]):
 
 
 async def _stop():
-    """请求 daemon 优雅关闭:探活→没有就直说→有就连上发 shutdown。
-
-    daemon 关闭时连接会断,send_command 的响应可能收不到(读循环里挂起的 future 被
-    置成 ConnectionError)—— 那是预期的,吞掉当成功。"""
+    """请求 daemon 优雅关闭:探活→没有就直说→有就连上发 shutdown。"""
     if not await _probe():
         print("daemon 未在运行")
         return
-    client = SocketClient(*get_address())
-    await client.connect()
-    loop_task = asyncio.create_task(client.run_event_loop())
-    ok = True
     try:
-        await client.send_command("shutdown", {})   # 正常返回 "shutting down" = 成功
-    except ConnectionError:
-        pass          # 连接随 daemon 关闭而断,收不到回执 —— 也是成功
-    except IpcError as e:
-        ok = False    # 收到错误响应(如老 daemon 没有 shutdown handler)= daemon 拒绝了
+        await request_shutdown()
+    except IpcError as e:   # 收到错误响应(如老 daemon 没有 shutdown handler)= daemon 拒绝了
         print(f"关闭失败:{e}")
-    loop_task.cancel()
-    try:
-        await client.close()
-    except Exception:
-        pass
-    if ok:
-        print("🛑 已请求 daemon 关闭")
+        return
+    print("🛑 已请求 daemon 关闭")
 
 
 def cmd_ping(args):
@@ -307,6 +292,19 @@ def cmd_trace(args):
     print(f"  工具  {tool_n} 次   {tool_total:>9.1f}ms")
     print(f"  总计          {llm_total + tool_total:>9.1f}ms")
 
+def cmd_init(args):
+    """无条件重跑配置向导(区别于 ensure_config:那个只在缺配置时才弹)。"""
+    from aemeathcode.cli.setup import run_wizard
+    if not run_wizard(local=args.local):
+        return
+    # 配置变了,但已经在跑的 daemon 还揣着启动那一刻的 env 快照 —— 杀掉重生才生效
+    try:
+        if asyncio.run(restart_daemon()):
+            print("  🔄 daemon 已重启,新配置生效")
+    except RuntimeError as e:
+        print(f"  ⚠️  {e}")
+
+
 def cmd_mcp_add(args):
     from aemeathcode.core.mcp.config import add_server
     if not args.command:
@@ -320,46 +318,60 @@ def cmd_mcp_add(args):
 
 def main():
     parser = argparse.ArgumentParser(prog='aemeath')
-    # 不传子命令时默认进 TUI(类似 claude code:敲 aemeath 直接进界面)
-    parser.set_defaults(func=cmd_tui)
+    # needs_llm 标记"这条命令会用到 LLM 配置(或会拉起用到它的 daemon)",
+    # 在下面 args.func(args) 之前【一处收口】统一检查 —— 别在每个 cmd_* 开头各贴一行。
+    # 好处:哪些命令需要配置成了 parser 声明的一部分,加新命令时一眼看得见。
+    # ⚠️ 每个子命令都必须显式写:顶层 set_defaults 的键会【泄漏】进所有子命令的 namespace,
+    #    子 parser 只覆盖它自己 set 的那几个键。漏写 = 悄悄继承顶层的 True。
+    parser.set_defaults(func=cmd_tui, needs_llm=True)  # 不传子命令时默认进 TUI(敲 aemeath 直接进界面)
     subparsers = parser.add_subparsers(dest="command")
 
     p_core = subparsers.add_parser('core')
-    p_core.set_defaults(func=cmd_core)
+    p_core.set_defaults(func=cmd_core, needs_llm=True)
 
     p_run = subparsers.add_parser('run')     # 一次性:建 single_turn 会话跑一发
     p_run.add_argument("goal")
-    p_run.set_defaults(func=cmd_run)
+    p_run.set_defaults(func=cmd_run, needs_llm=True)
 
     p_chat = subparsers.add_parser('chat')   # 多轮:建 multi_turn 会话,REPL 复用
-    p_chat.set_defaults(func=cmd_chat)
+    p_chat.set_defaults(func=cmd_chat, needs_llm=True)
 
     p_ping = subparsers.add_parser("ping")
-    p_ping.set_defaults(func=cmd_ping)
+    p_ping.set_defaults(func=cmd_ping, needs_llm=False)
 
     p_stop = subparsers.add_parser("stop")   # 手动关闭后台 daemon(混合生命周期:退出不自动关)
-    p_stop.set_defaults(func=cmd_stop)
+    p_stop.set_defaults(func=cmd_stop, needs_llm=False)
+
+    p_init = subparsers.add_parser('init')   # 重跑配置向导(改 key / 换模型)
+    # 默认写全局(一台机器一份凭证);--local 写 .aemeath/.env 只覆盖当前项目
+    p_init.add_argument("--local", action="store_true", help="只为当前项目配置(写 .aemeath/.env)")
+    p_init.set_defaults(func=cmd_init, needs_llm=False)  # 向导自己会跑,别在这儿先弹一次
 
     p_watch = subparsers.add_parser('watch')
     p_watch.add_argument("--scope", default="global")
     p_watch.add_argument("--topics", default=["*"])
-    p_watch.set_defaults(func=cmd_watch)
+    p_watch.set_defaults(func=cmd_watch, needs_llm=True)   # 自己不调 LLM,但会拉起要配置的 daemon
 
     p_tui = subparsers.add_parser('tui')     # 显式写法,和裸 aemeath 等价
-    p_tui.set_defaults(func=cmd_tui)
+    p_tui.set_defaults(func=cmd_tui, needs_llm=True)
 
     p_trace = subparsers.add_parser('trace')  # 读最新 trace 文件,打印时间线
-    p_trace.set_defaults(func=cmd_trace)
+    p_trace.set_defaults(func=cmd_trace, needs_llm=False)
 
     p_mcp = subparsers.add_parser('mcp')       # 管理 MCP server
-    p_mcp.set_defaults(func=lambda a: print("用法:aemeath mcp add <name> <命令...>"))
+    p_mcp.set_defaults(func=lambda a: print("用法:aemeath mcp add <name> <命令...>"), needs_llm=False)
     mcp_sub = p_mcp.add_subparsers(dest="mcp_command")
     p_mcp_add = mcp_sub.add_parser('add')      # aemeath mcp add <name> <命令...>
     p_mcp_add.add_argument("name")
     p_mcp_add.add_argument("command", nargs=argparse.REMAINDER)  # 剩下的全当命令(含 -y 这种 flag)
-    p_mcp_add.set_defaults(func=cmd_mcp_add)
+    p_mcp_add.set_defaults(func=cmd_mcp_add, needs_llm=False)
 
     args = parser.parse_args()
+    if getattr(args, "needs_llm", False):
+        # 一处收口:缺配置就在这里弹向导,弹不成就带着人话退出 —— 绝不让一个注定崩的
+        # daemon 被拉起来,然后只回一句"启动失败,请查看日志"。
+        from aemeathcode.cli.setup import ensure_config
+        ensure_config()
     try:
         args.func(args)
     except KeyboardInterrupt:

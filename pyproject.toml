@@ -1,6 +1,6 @@
 [project]
 name = "aemeathcode"
-version = "0.1.0"
+version = "0.1.1"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic==0.120.2",
@@ -21,6 +21,11 @@ build-backend = "hatchling.build"
 # 告诉 hatchling 包的源码在 src/aemeathcode 下
 [tool.hatch.build.targets.wheel]
 packages = ["src/aemeathcode"]
+
+# sdist 默认会把仓库里没被 .gitignore 的文件全打进去 —— assets/ 里的 GIF 有 4.3MB,
+# 那是 README 在 GitHub 上的门面,装包的人一个字节都用不到。排掉。
+[tool.hatch.build.targets.sdist]
+exclude = ["assets"]
 
 [dependency-groups]
 dev = [

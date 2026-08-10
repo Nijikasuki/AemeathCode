@@ -9,7 +9,7 @@ from aemeathcode.agent.tools import registry
 from aemeathcode.core.mcp.client import MCPClient
 from aemeathcode.core.mcp.tool import MCPTool
 from aemeathcode.core.mcp.config import load_servers
-from aemeathcode.core.config import get_config, get_data_dir
+from aemeathcode.core.config import ensure_data_dir, get_config, get_data_dir
 from aemeathcode.core.logging_setup import setup_logging
 from aemeathcode.core.memory.note import NoteStore
 from aemeathcode.core.permissions.storage import PermissionStore
@@ -24,7 +24,8 @@ from aemeathcode.transport.ipc_broadcaster import IpcEventBroadcaster,Subscriber
 
 
 logger = logging.getLogger(__name__)
-DATA_DIR = get_data_dir()   # 所有本地数据统一收进这里(默认 .aemeath/)
+DATA_DIR = get_data_dir()   # 所有本地数据统一收进这里(默认 .aemeath/);建目录在 main() 里做,
+                            # 模块级只算路径 —— import 一下就在人家目录里拉出个文件夹太失礼
 broadcaster = IpcEventBroadcaster()
 store = SessionStore(DATA_DIR / "sessions")
 note_store = NoteStore(DATA_DIR)
@@ -129,6 +130,7 @@ async def connect_mcp_servers(mcp_clients: list) -> None:
 
 
 async def main():
+    ensure_data_dir()      # 建 .aemeath/ 并落自我忽略的 .gitignore
     config = get_config()
     setup_logging(config)
     server = SocketServer(host=config.host,port=config.port,broadcaster=broadcaster,approval_registry=approval_registry)

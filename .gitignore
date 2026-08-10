@@ -1,7 +1,12 @@
 # Secrets / local env
+.aemeath/.env
+# 代码已不读根目录的 .env,但照老习惯建出来的仍然是装密钥的文件,别提交
 .env
 .env.*
 !.env.example
+
+# 学习历程存档(S0–S7 的详细日志,从 CLAUDE.md 拆出来的私人笔记)
+NOTES.md
 
 # Python
 __pycache__/

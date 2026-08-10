@@ -65,9 +65,28 @@ uv sync
 
 ### 2. 配置
 
+**什么都不用做** —— 第一次跑 `aemeath` 时会自动弹出配置向导,问你三件事(API Key、
+Base URL、模型名),填完写进全局配置位。想改配置随时 `aemeath init` 重跑。
+
+配置按两级读取,**项目级覆盖全局**:
+
+| 优先级 | 位置 | 用途 |
+|---|---|---|
+| 1(最高) | 真正的 shell 环境变量 | 临时覆盖,如 `AEMEATH_PORT=8888 aemeath` |
+| 2 | 当前目录的 `.aemeath/.env` | 这个项目专用(换模型 / 换 key) |
+| 3(兜底) | `~/.config/aemeath/.env` | 全局:装一次,到处能用 |
+
+> 项目级配置读的是 `.aemeath/.env`,**不是你项目根目录的 `.env`**。这是刻意的:
+> `.env` 里往往有你自己的 `DATABASE_URL` / 各种密钥,而 agent 有 `bash` 工具、
+> 子进程会继承环境变量 —— 只读自己的文件,你的密钥就不会被卷进来。
+> `.aemeath/` 建出来时会自带一张自我忽略的 `.gitignore`,不怕误提交。
+
+**想只给某个项目换模型 / 换 key?** 三种方式随便挑:
+
 ```bash
-cp .env.example .env
-# 编辑 .env:填入 ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY / AEMEATH_LLM_DEFAULT_MODEL
+aemeath init --local            # ① 向导写 .aemeath/.env(默认不带 --local 是写全局)
+cp .env.example .aemeath/.env   # ② 从模板抄一份改(全部可用变量都在模板里)
+                                # ③ 或者直接手写 .aemeath/.env,只放要覆盖的那几行
 ```
 
 AemeathCode 对接任何 **Anthropic Messages API 兼容**的端点(官方、DeepSeek、自建网关皆可)。
@@ -91,6 +110,8 @@ aemeath          # 就这一条 —— 自动在后台拉起大脑(daemon)并进
 | 命令 | 作用 |
 |---|---|
 | `aemeath` | 进入 TUI 工作台(等价于 `aemeath tui`;自动拉起后台 daemon) |
+| `aemeath init` | 重跑配置向导,写全局配置(daemon 在跑会自动重启使其生效) |
+| `aemeath init --local` | 同上,但只写当前项目的 `.aemeath/.env` |
 | `aemeath run "<目标>"` | 单轮模式:建一个 single-turn 会话跑一发就退 |
 | `aemeath chat` | 多轮模式:REPL,复用同一会话连续对话 |
 | `aemeath stop` | 关闭后台常驻的 daemon |
@@ -186,7 +207,7 @@ AemeathCode 是一个能**真实执行 shell 命令、读写本地文件**的 Ag
 
 - 在你信任的、隔离的环境(容器 / 沙箱 / 专用目录)里运行,不要直接指着重要数据跑;
 - 审批弹窗出现时看清命令再批,`allow_always` 会记住,别对危险命令随手放行;
-- API Key 等密钥放在 `.env`(已被 `.gitignore` 忽略),不要提交。
+- API Key 等密钥放在 `.aemeath/.env` 或 `~/.config/aemeath/.env`(前者自带 `.gitignore`),不要提交。
 
 本项目仅用于学习与研究,使用者对其行为负责。
 

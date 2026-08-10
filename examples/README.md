@@ -46,7 +46,7 @@ AemeathCode 能作为 **MCP 客户端**连接外部工具 server(GitHub、文件
 cp examples/mcp.json .aemeath/mcp.json               # 按需增删,改完重启 aemeath core 生效
 ```
 
-> GitHub 那个 server 需要在 `.env` 里配 `GITHUB_PERSONAL_ACCESS_TOKEN`(子进程会继承)。
+> GitHub 那个 server 需要在 `../.aemeath/.env` 里配 `GITHUB_PERSONAL_ACCESS_TOKEN`(子进程会继承)。
 > 连真实 MCP server 需要本机装了 `node` / `npx`。
 
 ---

@@ -63,9 +63,29 @@ uv sync
 
 ### 2. Configure
 
+**Nothing to do** — the first `aemeath` run opens a setup wizard asking for three
+things (API key, base URL, model name) and writes them to the global config. Run
+`aemeath init` any time to change them.
+
+Config is read from two levels, **project overrides global**:
+
+| Priority | Location | Purpose |
+|---|---|---|
+| 1 (highest) | Real shell environment variables | One-off override, e.g. `AEMEATH_PORT=8888 aemeath` |
+| 2 | `.aemeath/.env` in the current directory | Per-project (different model / key) |
+| 3 (fallback) | `~/.config/aemeath/.env` | Global: configure once, works anywhere |
+
+> Project config lives in `.aemeath/.env`, **not your project's own `.env`**. That is
+> deliberate: your `.env` usually holds `DATABASE_URL` and other secrets, and the agent
+> has a `bash` tool whose subprocesses inherit the environment — reading only our own
+> file keeps your secrets out of it. `.aemeath/` ships with a self-ignoring `.gitignore`.
+
+**Want a different model / key for just one project?** Any of these three:
+
 ```bash
-cp .env.example .env
-# edit .env: fill in ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY / AEMEATH_LLM_DEFAULT_MODEL
+aemeath init --local            # 1. wizard writes .aemeath/.env (without --local it writes global)
+cp .env.example .aemeath/.env   # 2. copy the template and edit (every variable is listed there)
+                                # 3. or hand-write .aemeath/.env with only the lines you override
 ```
 
 AemeathCode works with any **Anthropic Messages API–compatible** endpoint (official, DeepSeek, your own gateway, etc.).
@@ -87,6 +107,8 @@ aemeath          # just this —— auto-starts the daemon in the background and
 | Command | What it does |
 |---|---|
 | `aemeath` | Enter the TUI (same as `aemeath tui`; auto-starts the daemon) |
+| `aemeath init` | Re-run the setup wizard, writing global config (restarts a running daemon so it takes effect) |
+| `aemeath init --local` | Same, but writes this project's `.aemeath/.env` |
 | `aemeath run "<goal>"` | One-shot: create a single-turn session, run once, exit |
 | `aemeath chat` | Multi-turn: a REPL reusing one session |
 | `aemeath stop` | Shut down the resident background daemon |
@@ -177,7 +199,7 @@ AemeathCode is an agent that can **really execute shell commands and read/write 
 
 - Run it in a trusted, isolated environment (container / sandbox / dedicated directory); don't point it at important data;
 - Read commands carefully before approving —— `allow_always` is remembered, so don't wave through dangerous ones;
-- Keep secrets like API keys in `.env` (already gitignored); never commit them.
+- Keep secrets in `.aemeath/.env` or `~/.config/aemeath/.env` (the former self-ignores); never commit them.
 
 This project is for learning and research only; users are responsible for its behavior.
 

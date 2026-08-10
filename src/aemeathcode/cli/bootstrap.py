@@ -8,7 +8,7 @@ import asyncio
 import subprocess
 import sys
 
-from aemeathcode.core.config import get_address, get_data_dir
+from aemeathcode.core.config import ensure_data_dir, get_address, get_data_dir
 from aemeathcode.transport.socket_client import SocketClient
 
 
@@ -38,7 +38,7 @@ async def _probe(timeout: float = 0.5) -> bool:
 
 def _spawn_daemon() -> None:
     """在后台拉起一个脱离终端的 daemon,立即返回(等它 ready 是 _wait_ready 的事)。
-
+    subprocess.Popen(...)	启动,立刻返回,进程在后台继续跑
     三个必须项,缺一个都有坑:
       · start_new_session=True → 脱离控制终端/进程组,daemon 独立于我而活
         (S4 那把'建独立进程组'的刀的反面用法:那时为一锅端杀,这里为独立存活)
@@ -46,16 +46,14 @@ def _spawn_daemon() -> None:
         ⚠️ 千万别用 PIPE:没人读,管子写满 daemon 直接卡死
       · stdin=DEVNULL → 别让它跟前端抢终端输入
     命令用 `-m aemeathcode.core.app` 而非 PATH 里的 aemeath:不依赖安装方式,最稳。"""
-    data_dir = get_data_dir()
-    data_dir.mkdir(parents=True, exist_ok=True)
-    log_path = data_dir / "core.log"
+    log_path = ensure_data_dir() / "core.log"
     # with 退出时 close 的是父进程这份副本;子进程已 dup 到自己的 fd,不受影响
     with open(log_path, "a", encoding="utf-8") as log:
         subprocess.Popen(
             [sys.executable, "-m", "aemeathcode.core.app"],
             stdout=log,
             stderr=log,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, #防止和tui端抢键盘
             start_new_session=True,
         )
 
@@ -69,6 +67,53 @@ async def _wait_ready(attempts: int = 50, interval: float = 0.1) -> bool:
             return True
         await asyncio.sleep(interval)
     return False
+
+
+async def _wait_gone(attempts: int = 50, interval: float = 0.1) -> bool:
+    """_wait_ready 的镜像:轮询直到 daemon 探不到(端口空了、进程真的退了)。
+
+    重启必须等它真死:老 daemon 还占着端口时拉新的,新的会因"防重复启动"自杀。"""
+    for _ in range(attempts):
+        if not await _probe():
+            return True
+        await asyncio.sleep(interval)
+    return False
+
+
+async def request_shutdown() -> None:
+    """连上 daemon 发 shutdown(远程按下 S0 那面优雅关闭旗)。
+
+    daemon 关闭时连接会断,响应可能收不到(读循环把挂起的 future 置成 ConnectionError)
+    —— 那是预期的,吞掉当成功。收到错误响应(IpcError)则往上抛,那是 daemon 真的拒绝了。"""
+    client = SocketClient(*get_address())
+    await client.connect()
+    loop_task = asyncio.create_task(client.run_event_loop())
+    try:
+        await client.send_command("shutdown", {})
+    except ConnectionError:
+        pass
+    finally:
+        loop_task.cancel()
+        try:
+            await client.close()
+        except Exception:
+            pass
+
+
+async def restart_daemon() -> bool:
+    """杀掉重生,让 daemon 重新读配置。返回 False = 它本来就没在跑(无事可做)。
+
+    为什么非重启不可:**环境变量是进程启动那一刻读进内存的快照**,已经在跑的 daemon
+    永远看不见你新写的 .env。没有热重载(见 roadmap P3-8)就只能重启。"""
+    if not await _probe():
+        return False
+    await request_shutdown()
+    if not await _wait_gone():
+        raise RuntimeError("daemon 没有在预期时间内退出,请手动处理(aemeath stop)")
+    _spawn_daemon()
+    if not await _wait_ready():
+        raise RuntimeError(f"daemon 重启失败。请查看日志:{get_data_dir() / 'core.log'}")
+    return True
 
 
 async def ensure_daemon() -> None:
