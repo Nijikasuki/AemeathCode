@@ -40,7 +40,7 @@ from textual.widgets import Input, Static
 from aemeathcode.core.compact.budget import context_window
 from aemeathcode.core.config import get_config
 from aemeathcode.transport.socket_client import SocketClient
-from aemeathcode.tui import splash
+from aemeathcode.tui import clipboard, splash
 from aemeathcode.tui.ledger import RULE, RULE_NESTED, SYM, LedgerFrame, LedgerRow, fit
 from aemeathcode.tui.panels import (
     ApprovalPane,
@@ -76,8 +76,9 @@ COMMANDS = ["/resume", "/clear", "/usage", "/mcp", "/about", "/help", "/exit"]
 VERSION = "v0.2.1"
 # identity 决策 3 原文是"≤1 帧"—— 但实测 60ms 作用在角落一个三字标签上,人眼来不及,
 # 等于没做。130ms 仍然只是"闪一下"、不构成动画,但确实看得见。
-SHEEN_STEP = 0.08   # logo 流光的帧间隔(~12fps),只在空态跑
-HINTS = "^↑/^↓ 选会话 · Enter 恢复 · ^u/^d 滚动 content · ^j/^k 滚动 thinking · ^q 退出"
+SHEEN_STEP = 0.08     # logo 流光的帧间隔(~12fps),只在空态跑
+HINTS = ("^↑/^↓ 选会话 · ^u/^d 滚动 · ^j/^k thinking · "
+         "^y 复制回答 · ^r 复制全部 · ^q 退出")
 
 
 def _elapsed_ms(start_iso: str | None, end_iso: str | None) -> int:
@@ -98,6 +99,8 @@ class AemeathApp(App):
     # ctrl+k(删到行尾)。按键沿焦点链冒泡,App 在最末端,不给优先级就永远收不到。
     BINDINGS = [  # noqa: RUF012 —— Textual 的类属性约定
         Binding("ctrl+q", "quit", "退出", priority=True),
+        Binding("ctrl+y", "copy_answer", "复制最后一条回答", priority=True),
+        Binding("ctrl+r", "copy_all", "复制整个 content", priority=True),
         Binding("ctrl+up", "session_prev", "上一个会话", priority=True),
         Binding("ctrl+down", "session_next", "下一个会话", priority=True),
         Binding("ctrl+u", "scroll_up", "content 上滚", priority=True),
@@ -141,6 +144,8 @@ class AemeathApp(App):
         self._top_run_id: str | None = None
         self._run_start: float | None = None
         self._phase = 0.0            # logo 流光的相位
+        self._last_answer = ""       # ^y 复制用
+        self._transcript: list[str] = []   # ^r 复制用
         self._pending_perm: asyncio.Future[str] | None = None
 
     # ---- 布局 ----
@@ -191,10 +196,9 @@ class AemeathApp(App):
 
     def _refresh_status(self) -> None:
         self.p_status.render_status(
-            cwd=os.path.basename(os.getcwd()) or os.getcwd(),
+            cwd=_short_path(os.getcwd()),
             model=self._model or "",
             state=self._state_label(),
-            session=self._session_id or "",
         )
         self.query_one("#hints", Static).update(self._hints_line())
 
@@ -267,7 +271,11 @@ class AemeathApp(App):
 
     def _end_answer(self) -> None:
         if self._answer is not None:
+            text = self._answer.answer_text
             self._answer.finalize()
+            if text.strip():
+                self._last_answer = text          # 最终回答(叙述段会在 demote 时被覆盖回去)
+                self._transcript.append(text)
             self._answer = None
         self._streaming = False
 
@@ -387,8 +395,11 @@ class AemeathApp(App):
     async def _on_tool_start(self, event: dict, container: Widget, rule: str) -> None:
         # 后面跟了 tool call → 刚才那段文字是**过程叙述**不是最终回答 → 压暗
         if self._answer is not None:
+            text = self._answer.answer_text
             self._answer.finalize()
             self._answer.demote()
+            if text.strip():
+                self._transcript.append(text)     # 叙述也进整体复制,但不算"最后一条回答"
             self._answer = None
         self._streaming = False
         self.p_thinking.mark_segment()
@@ -537,6 +548,7 @@ class AemeathApp(App):
         if self._splash is not None:
             self._splash.remove()
             self._splash = None
+        self._transcript.append(f"› {text}")
         await self._view.mount(Static(LedgerRow("", ""), classes="gap"))
         await self._view.mount(Static(
             LedgerFrame(Text(text), gutter="›", gutter_style=S_MOTION), classes="user"
@@ -610,6 +622,8 @@ class AemeathApp(App):
         self._streaming = False
         self._run_start = None
         self._splash = None
+        self._transcript.clear()
+        self._last_answer = ""
 
     async def _show_mcp(self, servers: list) -> None:
         view = self._view
@@ -655,6 +669,43 @@ class AemeathApp(App):
 
     def action_scroll_down(self) -> None:
         self._view.scroll_page_down(animate=False)
+
+    # ---- 复制(P2-3)----
+    # Textual 的 copy_to_clipboard 走 OSC 52,所以 SSH 里也能把内容送回本机剪贴板 ——
+    # 这正是 TUI 输出复制不出来的根因:Textual 吃掉了鼠标选择,得由程序主动送。
+
+    def action_copy_answer(self) -> None:
+        if not self._last_answer:
+            self._flash("没有可复制的回答")
+            return
+        self._copy(self._last_answer, f"回答 · {len(self._last_answer)} 字")
+
+    def action_copy_all(self) -> None:
+        if not self._transcript:
+            self._flash("content 是空的")
+            return
+        body = "\n\n".join(self._transcript)
+        self._copy(body, f"{len(self._transcript)} 段 · {len(body)} 字")
+
+    def _copy(self, text: str, what: str) -> None:
+        """如实报告成败 —— OSC 52 失败是静默的,不能无条件说"已复制"。"""
+        try:
+            used = clipboard.copy(text)
+        except Exception as e:  # noqa: BLE001
+            self._flash(f"复制失败: {e}")
+            return
+        if used is None:
+            self.copy_to_clipboard(text)          # 没有系统命令 → 退回 OSC 52
+            self._flash(f"已发送 {what}(OSC 52,终端不支持则无效)")
+        else:
+            self._flash(f"已复制 {what}")
+
+    def _flash(self, msg: str) -> None:
+        """一次性提示:写进 Status 面板的状态行,下一次状态刷新自然覆盖掉。"""
+        self.p_status.render_status(
+            cwd=_short_path(os.getcwd()), model=self._model or "", state=msg,
+        )
+        self.set_timer(2.0, self._refresh_status)
 
     def _scroller(self):
         """审批打开时 ^j/^k 滚审批预览 —— 那一刻它才是要读的东西。"""
@@ -718,6 +769,14 @@ class AemeathApp(App):
                 await self._view.mount(block)
                 block.append_token(content)
                 block.finalize()
+
+
+def _short_path(path: str) -> str:
+    """当前项目目录。home 缩成 `~`,太长就砍前面留后面 —— 尾部才是有信息量的那段。"""
+    home = os.path.expanduser("~")
+    if path.startswith(home):
+        path = "~" + path[len(home):]
+    return path if len(path) <= 30 else "…" + path[-29:]
 
 
 def _estimate_msg_tokens(msg: dict) -> int:

@@ -161,6 +161,11 @@ class AnswerBlock(Static):
         # 用 CSS padding 做不到这点:padding 是纯空白,会把线切断。
         return Group(LedgerRow("", "", rule_char=self._rule), frame)
 
+    @property
+    def answer_text(self) -> str:
+        """给复制功能用的纯文本(原始 markdown,不是渲染后的)。"""
+        return self._text
+
     def demote(self) -> None:
         """后面跟了 tool call → 这段是过程叙述不是最终回答。压暗 + 去掉留白。"""
         self._narration = True

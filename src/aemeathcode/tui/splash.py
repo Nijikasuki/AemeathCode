@@ -27,7 +27,7 @@ from aemeathcode.tui.theme import (
     STRUCT_HEX,
 )
 
-TAGLINE = "长航的星辉"
+TAGLINE = "远航星"
 
 # opencode 那种实心块字形:笔画粗、方、没有描边缝隙。
 # 每个字母用 `▄▀█` 拼实心块,字母之间空一列。

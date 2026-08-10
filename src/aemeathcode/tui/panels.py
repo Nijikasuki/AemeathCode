@@ -60,18 +60,16 @@ class Panel(VerticalScroll):
 
 
 class StatusPanel(Panel):
-    """cwd / model / 连接与运行状态。永远有内容。"""
+    """cwd / model / 运行状态。永远有内容。"""
 
     def __init__(self) -> None:
         super().__init__("Status", id="p-status")
 
-    def render_status(self, *, cwd: str, model: str, state: str, session: str) -> None:
+    def render_status(self, *, cwd: str, model: str, state: str) -> None:
         body = Text()
         body.append(fit(cwd, 30) + "\n", style=S_LABEL)
         body.append(fit(model, 30) + "\n", style=S_DIM)
-        body.append(state, style=S_MOTION if state == "running" else S_DIM)
-        if session:
-            body.append(f"  ·  {session[:8]}", style=S_DIM)
+        body.append(state, style=S_MOTION if state.startswith("running") else S_DIM)
         self.body.update(body)
 
 

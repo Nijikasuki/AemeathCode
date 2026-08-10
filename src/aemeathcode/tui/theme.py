@@ -94,7 +94,7 @@ Screen { background: $background; }
     border-subtitle-color: $primary;
 }
 
-#p-status   { height: 5; }
+#p-status   { height: 6; }   /* 4 行内容:3 行文字 + 1 行留给电子故障的竖条 */
 #p-tasks    { height: 2fr; }   /* 右栏:当前进度最该看得全 */
 #p-mcp      { height: 1fr; }
 #p-skills   { height: 1fr; }
