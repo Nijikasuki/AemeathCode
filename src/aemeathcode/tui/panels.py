@@ -17,11 +17,11 @@ from dataclasses import dataclass
 
 from rich.console import Group
 from rich.text import Text
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
 from aemeathcode.tui.ledger import fit
-from aemeathcode.tui.theme import S_DIM, S_ERROR, S_LABEL, S_MOTION, S_STRUCT
+from aemeathcode.tui.theme import S_ADD, S_DIM, S_ERROR, S_LABEL, S_MOTION, S_STRUCT
 
 # 任务状态 → 符号。和 task_update 工具的 enum 对齐。
 TASK_SYM = {
@@ -291,3 +291,83 @@ class SkillsPanel(Panel):
             rows.append(line)
         self.set_count(len(self.names), len(self.names))
         self.body.update(Group(*rows))
+
+
+def approval_preview(tool_name: str, params: dict, *, limit: int = 200) -> tuple[Text, str]:
+    """审批时该给用户看的东西 —— 返回 (预览, 边框右下角的计量)。
+
+    为什么这件事重要:之前审批只显示 `write_file  bubble_sort.py` 一行,
+    **用户是在对一个看不见内容的写入操作点"允许"**。那不叫审批,叫盲签。
+
+    好消息是 TUI 手上本来就有全部信息 —— `tool.call_started` 的 params 里带着完整
+    文件内容,而它先于权限请求到达。之前只是被我扔了,只留了个 path。零协议改动。
+    """
+    text = Text()
+    if tool_name == "write_file":
+        lines = str(params.get("content", "")).splitlines()
+        for line in lines[:limit]:
+            text.append("  + ", style=S_ADD)       # diff 约定:+ 标绿,内容用正常前景色
+            text.append(line + "\n")
+        if len(lines) > limit:
+            text.append(f"  ⋮ 还有 {len(lines) - limit} 行\n", style=S_DIM)
+        return text, f"{len(lines)} 行"
+    if tool_name == "bash":
+        # 完整命令,不截断 —— 长命令里藏着的东西正是审批要看的
+        text.append("  $ ", style=S_ADD)
+        text.append(str(params.get("command", "")))
+        return text, ""
+    for key, value in params.items():
+        text.append(f"  {key}  ", style=S_LABEL)
+        text.append(f"{value}\n")
+    return text, ""
+
+
+class ApprovalPane(Vertical):
+    """审批面板 —— **只在需要做决定时出现**,固定在 Content 底部。
+
+    这是整套 Detail 设计的核心取舍:把详情绑定到"必须做决定"的那一刻,而不是
+    绑定到"随便浏览"。于是完全不需要 Content 光标、面板焦点切换、抢按键 ——
+    出现时机由 agent 决定,不由用户导航决定。
+    """
+
+    DEFAULT_CSS = """
+    ApprovalPane { display: none; height: auto; max-height: 60%; border: round $warning;
+                   border-title-color: $warning; border-subtitle-color: $warning; padding: 0 1; }
+    ApprovalPane.-open { display: block; }
+    /* 预览可滚动,选项固定在底部 —— 按钮是全屏最不能被截掉的东西。
+       上一版把两者放在同一个 Static 里,长文件直接把选项顶出了 max-height。 */
+    ApprovalPane > #approval-preview { height: 1fr; scrollbar-size-vertical: 1; }
+    ApprovalPane > #approval-choices { dock: bottom; height: 1; }
+    """
+
+    def __init__(self) -> None:
+        super().__init__(id="approval")
+        self.body = Static("")
+        self._choices = Static("", id="approval-choices")
+
+    def compose(self):
+        yield VerticalScroll(self.body, id="approval-preview")
+        yield self._choices
+
+    def open(self, tool_name: str, params: dict) -> None:
+        preview, metric = approval_preview(tool_name, params)
+        target = target_hint(tool_name, params)
+        self.border_title = f"需要授权 · {tool_name}{'  ' + target if target else ''}"
+        self.border_subtitle = f"{metric}  ^j/^k 滚动" if metric else "^j/^k 滚动"
+        choices = Text()
+        for i, label in enumerate(("允许一次", "总是允许", "拒绝")):
+            choices.append(f"  {i + 1} ", style=S_MOTION)
+            choices.append(f"{label}     ", style="bold")
+        self.body.update(preview)
+        self._choices.update(choices)
+        self.add_class("-open")
+
+    def close(self) -> None:
+        self.remove_class("-open")
+
+
+def target_hint(tool_name: str, params: dict) -> str:
+    for key in ("path", "command", "goal", "name"):
+        if key in params:
+            return fit(str(params[key]), 48)
+    return ""

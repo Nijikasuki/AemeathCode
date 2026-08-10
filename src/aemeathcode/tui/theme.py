@@ -66,6 +66,7 @@ S_GLOW    = _c(GLOW_HEX)            # 冷青微光:极弱的辅助,用得很省
 S_MOTION  = _c(MOTION)               # 粉 = 正在动
 S_ERROR   = _c("#D96A72", "bold")
 S_WARN    = _c("#D9B86A", "bold")
+S_ADD     = _c("#8CBF9E")            # diff 的 + —— 唯一一处在错误之外用语义色
 
 APP_CSS = """
 Screen { background: $background; }
@@ -120,4 +121,5 @@ Screen { background: $background; }
 .answer.-narration { color: $text-muted; }
 .user   { padding: 1 0 0 0; color: $text; text-style: bold; height: auto; }
 .gap    { height: 1; }
+.about  { height: auto; padding: 1 0 0 2; }
 """

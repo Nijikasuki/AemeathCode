@@ -43,6 +43,7 @@ from aemeathcode.transport.socket_client import SocketClient
 from aemeathcode.tui import splash
 from aemeathcode.tui.ledger import RULE, RULE_NESTED, SYM, LedgerFrame, LedgerRow, fit
 from aemeathcode.tui.panels import (
+    ApprovalPane,
     McpPanel,
     SessionsPanel,
     SkillsPanel,
@@ -71,8 +72,11 @@ from aemeathcode.tui.widgets import (
 
 HIDDEN_TYPES = {"run.started"}      # goal 已经由输入回显过了,重复
 # /sessions 删掉了:Sessions 面板常驻可见,它没有任何 /resume 之外的作用
-COMMANDS = ["/resume", "/clear", "/usage", "/mcp", "/help", "/exit"]
+COMMANDS = ["/resume", "/clear", "/usage", "/mcp", "/about", "/help", "/exit"]
 VERSION = "v0.2.1"
+# identity 决策 3 原文是"≤1 帧"—— 但实测 60ms 作用在角落一个三字标签上,人眼来不及,
+# 等于没做。130ms 仍然只是"闪一下"、不构成动画,但确实看得见。
+SHEEN_STEP = 0.08   # logo 流光的帧间隔(~12fps),只在空态跑
 HINTS = "^↑/^↓ 选会话 · Enter 恢复 · ^u/^d 滚动 content · ^j/^k 滚动 thinking · ^q 退出"
 
 
@@ -84,43 +88,6 @@ def _elapsed_ms(start_iso: str | None, end_iso: str | None) -> int:
         return max(int(delta.total_seconds() * 1000), 0)
     except ValueError:
         return 0
-
-
-class PermissionPrompt(Vertical):
-    """内联权限请求 —— 跟在那条工具调用下面,不覆盖整屏、不加边框、不填色块。
-
-    审批需要上下文(哪个 tool、什么命令),所以留在 content 里而不是做成固定面板;
-    "找不到它在哪"由自动滚动 + Status 面板的状态解决。
-    """
-
-    DEFAULT_CSS = "PermissionPrompt { height: auto; }"
-    OPTIONS = (("allow_once", "允许一次"), ("allow_always", "总是允许"), ("deny", "拒绝"))
-
-    def __init__(self, ask: dict, future: "asyncio.Future[str]", *, skip_detail: str = "") -> None:
-        super().__init__()
-        self._ask = ask
-        self._future = future
-        self._skip = skip_detail
-
-    def compose(self) -> ComposeResult:
-        tool = self._ask.get("tool_name", "")
-        detail = self._ask.get("detail", "")
-        head = Text()
-        head.append(f"{tool}  ", style="bold")
-        head.append("需要授权", style=S_WARN)
-        yield Static(LedgerRow(SYM["ask"], head, gutter_style=S_WARN))
-        if detail and detail.strip() != self._skip.strip():
-            yield Static(LedgerRow("", Text(detail, style="dim"), indent=2))
-        choices = Text()
-        for i, (_, label) in enumerate(self.OPTIONS):
-            choices.append(f"  {i + 1} ", style=S_MOTION)
-            choices.append(f"{label}     ", style="bold")
-        yield Static(LedgerRow("", choices, indent=2))
-
-    def decide(self, decision: str) -> None:
-        if not self._future.done():
-            self._future.set_result(decision)
-        self.remove()
 
 
 class AemeathApp(App):
@@ -156,22 +123,25 @@ class AemeathApp(App):
         self.p_sessions = SessionsPanel()
         self.p_mcp = McpPanel()
         self.p_skills = SkillsPanel()
+        self.approval = ApprovalPane()
         # content 区的流式块
         self._answer: AnswerBlock | None = None
         self._streaming = False
         self._splash: Static | None = None
+        self._splash_variant = "full"
         # tool 分组
         self._group: ToolGroup | None = None
         self._group_started = 0.0
         self._calls: dict[str, tuple[ToolCall, Widget]] = {}
-        self._last_target = ""
+        self._last_call: tuple[str, dict] = ("", {})
         # subagent 嵌套
         self._spawns: dict[str, SubagentBlock] = {}
         self._sub_runs: dict[str, SubagentBlock] = {}
         # run 计时
         self._top_run_id: str | None = None
         self._run_start: float | None = None
-        self._pending_perm: PermissionPrompt | None = None
+        self._phase = 0.0            # logo 流光的相位
+        self._pending_perm: asyncio.Future[str] | None = None
 
     # ---- 布局 ----
 
@@ -184,6 +154,7 @@ class AemeathApp(App):
             with Vertical(id="main"):
                 with Vertical(id="content", classes="panel"):
                     yield VerticalScroll(id="content-body")
+                    yield self.approval
                 with Horizontal(id="input-panel", classes="panel"):
                     yield Input(
                         placeholder="输入目标回车执行  ·  / 命令",
@@ -214,6 +185,7 @@ class AemeathApp(App):
         self.query_one("#goal", Input).focus()
         self.run_worker(self._connect)
         self.set_interval(1.0, self._tick)
+        self.set_interval(SHEEN_STEP, self._sheen)
 
     # ---- 面板刷新 ----
 
@@ -229,13 +201,16 @@ class AemeathApp(App):
     def _state_label(self) -> str:
         if self._state == "running" and self._run_start is not None:
             return f"running {int(time.monotonic() - self._run_start)}s"
-        return {
+        label = {
             "connecting": "连接中", "ready": "就绪", "idle": "就绪",
             "ask": "等待授权", "disconnected": "disconnected", "failed": "失败",
         }.get(self._state, self._state)
+        return label
 
     def _hints_line(self) -> Text:
-        """底部常驻契约行 —— lazygit 的可发现性来源:永远知道能按什么。"""
+        """底部常驻契约行 —— lazygit 的可发现性来源:永远知道能按什么。
+
+"""
         pct = self._ctx_used / self._window if self._window else 0.0
         bar = "▓" if pct >= 0.85 else ("▒" if pct >= 0.60 else "░")
         line = Text(HINTS, style=S_STRUCT)
@@ -254,14 +229,29 @@ class AemeathApp(App):
         name = os.environ.get("AEMEATH_SPLASH", "full")
         if name == "none":
             return
-        self._splash = Static(splash.make(name), id="splash")
+        self._splash_variant = name
+        self._phase = 0.0
+        self._splash = Static(splash.make(name, self._phase), id="splash")
         self._view.mount(self._splash)
+
+    def _sheen(self) -> None:
+        """推进 logo 流光。只在空态存在时跑 —— 没有 logo 就不烧 CPU。
+
+        这是 identity.md「有心跳的机器 / 波动爱心」那条:持续、周期、柔和的脉冲。
+        """
+        if self._splash is None or not self._splash.is_mounted:
+            return
+        self._phase += SHEEN_STEP
+        self._splash.update(splash.make(self._splash_variant, self._phase))
 
     # ---- content 区 ----
 
     @property
     def _view(self) -> VerticalScroll:
         return self.query_one("#content-body", VerticalScroll)
+
+    def _mount(self, container: Widget, widget: Widget):
+        return container.mount(widget)
 
     def _container_for(self, event: dict) -> tuple[Widget, str]:
         """按 run_id 决定往哪挂:子 agent 的事件进它的 body(嵌套 + 换竖线字符)。"""
@@ -414,6 +404,7 @@ class AemeathApp(App):
         if name == "use_skill":
             self.p_skills.used(str(params.get("name", "")))
 
+        self._last_call = (name, params)   # 审批预览要拿它显示"将要写入什么"
         if name == "spawn_agent":
             self._close_group()
             block = SubagentBlock(fit(str(params.get("goal", "")), 48))
@@ -423,7 +414,6 @@ class AemeathApp(App):
             return
 
         call = ToolCall(name=name, params=params, started_at=ts)
-        self._last_target = call.target
         if is_readonly(name):
             if self._group is None:
                 self._group = ToolGroup(rule_char=rule)
@@ -481,11 +471,16 @@ class AemeathApp(App):
     # ---- 权限 ----
 
     async def _prompt_permission(self, ask: dict) -> str:
+        """审批 —— 详情面板只在这一刻出现,批完就消失。
+
+        不需要 Content 光标、不需要面板焦点切换:出现时机由 agent 决定,不由导航决定。
+        """
         future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-        prompt = PermissionPrompt(ask, future, skip_detail=self._last_target)
-        self._pending_perm = prompt
-        await self._view.mount(prompt)
-        self._view.scroll_end(animate=False)     # 自动滚到它 —— 长会话里别让人找
+        name, params = self._last_call
+        if name != ask.get("tool_name"):        # 对不上就退回只显示 ask 自带的信息
+            name, params = ask.get("tool_name", ""), {"detail": ask.get("detail", "")}
+        self.approval.open(name, params)
+        self._pending_perm = future
         self._set_state("ask")
         goal = self.query_one("#goal", Input)
         goal.disabled = True
@@ -493,6 +488,7 @@ class AemeathApp(App):
             return await future
         finally:
             self._pending_perm = None
+            self.approval.close()
             goal.disabled = False
             goal.focus()
             self._set_state("running" if self._run_start is not None else "idle")
@@ -565,6 +561,8 @@ class AemeathApp(App):
         elif text == "/mcp":
             resp = await self._client.send_command("mcp.list", {})
             await self._show_mcp(resp["servers"])
+        elif text == "/about":
+            await self._show_about()
         elif text == "/help":
             await view.mount(EventRow("", Text("  ".join(COMMANDS), style="dim")))
         elif text == "/clear":
@@ -582,6 +580,26 @@ class AemeathApp(App):
             await view.mount(EventRow("", Text(f"未知命令 {text}", style="dim")))
             await view.mount(EventRow("", Text("  ".join(COMMANDS), style="dim")))
         view.scroll_end(animate=False)
+
+    async def _show_about(self) -> None:
+        """`/about` —— 全项目唯一出现她的地方(identity 决策 4:只在显式召唤下现形)。
+
+        窄屏降级是决策的一部分,不是可选优化:宽 < 64 或高 < 34 就只出文字。
+        """
+        view = self._view
+        size = self.query_one("#content", Vertical).content_size
+        if size.width >= 64 and size.height >= 20:
+            await self._mount(view, Static(splash.Wordmark(), classes="about"))
+        rows = [
+            (f"AemeathCode  {splash.VERSION}", ""),
+            ("一个轻量、可观察、可修改的 Coding Agent Runtime", "dim"),
+            ("", ""),
+            (f"model      {self._model}", "dim"),
+            (f"session    {(self._session_id or '')[:8]}", "dim"),
+            (f"context    {self._ctx_used} / {self._window}", "dim"),
+        ]
+        for content, style in rows:
+            await self._mount(view, EventRow("", Text(content, style=style)))
 
     def _reset_run_state(self) -> None:
         self._spawns.clear()
@@ -638,11 +656,17 @@ class AemeathApp(App):
     def action_scroll_down(self) -> None:
         self._view.scroll_page_down(animate=False)
 
+    def _scroller(self):
+        """审批打开时 ^j/^k 滚审批预览 —— 那一刻它才是要读的东西。"""
+        if self.approval.has_class("-open"):
+            return self.query_one("#approval-preview")
+        return self.p_thinking
+
     def action_think_up(self) -> None:
-        self.p_thinking.scroll_page_up(animate=False)
+        self._scroller().scroll_page_up(animate=False)
 
     def action_think_down(self) -> None:
-        self.p_thinking.scroll_page_down(animate=False)
+        self._scroller().scroll_page_down(animate=False)
 
     async def on_key(self, event) -> None:
         # 审批的按键在 App 层收 —— 容器 widget 默认 can_focus=False,靠它自己 focus() 是空操作,
@@ -650,8 +674,8 @@ class AemeathApp(App):
         if self._pending_perm is not None:
             choice = {"1": "allow_once", "2": "allow_always",
                       "3": "deny", "escape": "deny"}.get(event.key)
-            if choice:
-                self._pending_perm.decide(choice)
+            if choice and not self._pending_perm.done():
+                self._pending_perm.set_result(choice)
                 event.stop()
             return
         if event.key == "escape" and self.p_sessions.picking:

@@ -68,16 +68,34 @@ def _letter_spans(rows: tuple[str, ...]) -> list[tuple[int, int]]:
     return spans
 
 
-def _letter_color(i: int, n: int) -> str:
+# 流光:一条亮带扫过 logo,扫完停一拍再来。
+# 这是 identity.md「有心跳的机器 / 波动爱心」那条的落地 —— 持续、周期、柔和的脉冲。
+# 参考素材是角色肩后那团一张一缩的辉光。
+SHEEN_HEX = "#FFFFFF"      # 亮带的顶点:白,不是粉 —— 光本身没有颜色
+SWEEP_SPAN = 2.6           # 扫一遍要几个"相位单位"
+SWEEP_PAUSE = 1.8          # 扫完停多久再来
+
+
+def _letter_color(i: int, n: int, phase: float | None = None) -> str:
     """逐**字母**取色 —— opencode 的做法。整个字母一个深浅,比逐字符渐变更有形。
 
     粉占前 2/3(她的头发),后段沉向藏青(裙摆)。幂曲线偏置保证粉是主体。
+
+    `phase` 非 None 时叠加流光:亮带中心附近的字母被推向白,离得越远越接近本色。
     """
     t = (i / max(n - 1, 1)) ** 3.0          # 幂曲线:前面几个字母几乎不动
     if t < 0.72:
         # 前段只走到冷青的一半 —— 粉必须是主体,不能五五开(五五开会糊成灰紫)
-        return _lerp(MOTION_HEX, GLOW_HEX, t / 0.72 * 0.5)
-    return _lerp(GLOW_HEX, STRUCT_HEX, (t - 0.72) / 0.28)
+        base = _lerp(MOTION_HEX, GLOW_HEX, t / 0.72 * 0.5)
+    else:
+        base = _lerp(GLOW_HEX, STRUCT_HEX, (t - 0.72) / 0.28)
+    if phase is None:
+        return base
+    cycle = SWEEP_SPAN + SWEEP_PAUSE
+    head = (phase % cycle) / SWEEP_SPAN * (n + 1) - 0.5     # 亮带中心,扫完就跑出右边界
+    d = abs(i / max(n - 1, 1) * n - head)
+    glow = max(0.0, 1.0 - (d / 1.3) ** 2)                   # 柔和衰减,不是硬边
+    return _lerp(base, SHEEN_HEX, glow * 0.75)
 
 
 class Wordmark:
@@ -95,6 +113,9 @@ class Wordmark:
 
     BIAS = 1.7          # 越大,粉占的面积越大
     HORIZ = 0.34        # 横向分量权重(制造平滑,不喧宾夺主)
+
+    def __init__(self, phase: float | None = None) -> None:
+        self.phase = phase
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         big = options.max_width >= len(WORDMARK[0]) + 4
@@ -205,6 +226,9 @@ class Splash:
     Textual 的 content-align 只认单个 renderable。
     """
 
+    def __init__(self, phase: float | None = None) -> None:
+        self.phase = phase
+
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         width = options.max_width
         big = width >= len(WORDMARK[0]) + 4
@@ -226,7 +250,8 @@ class Splash:
             yield Segment(art_pad)
             for x, ch in enumerate(text):
                 idx = next((i for i, (a, b) in enumerate(spans) if a <= x < b), None)
-                style = Style(color=_letter_color(idx, len(spans))) if idx is not None else None
+                style = (Style(color=_letter_color(idx, len(spans), self.phase))
+                         if idx is not None else None)
                 yield Segment(ch, style)
             yield Segment("\n")
 
@@ -263,6 +288,10 @@ VARIANTS = {
 }
 
 
-def make(name: str = "full"):
+def make(name: str = "full", phase: float | None = None):
     """AEMEATH_SPLASH=full|stars|line|core|none 切换;none 由调用方处理。"""
-    return VARIANTS.get(name, Splash)()
+    cls = VARIANTS.get(name, Splash)
+    try:
+        return cls(phase)
+    except TypeError:          # Horizon / Core 不吃 phase
+        return cls()
