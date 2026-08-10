@@ -369,3 +369,42 @@ def target_hint(tool_name: str, params: dict) -> str:
         if key in params:
             return fit(str(params[key]), 48)
     return ""
+
+
+class ChangesPanel(Panel):
+    """本轮碰过的文件。
+
+    数据来自 `write_file` 的调用参数 —— 和任务板一样,事件流里信息已经够了,
+    不需要给 daemon 加协议。`+N` 是写入的行数(不是 diff 的增量:
+    TUI 手上没有旧内容,拿不到真正的增删行数,所以只报"写了多少行",不谎报成 diff)。
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Changes", id="p-changes")
+        self.files: dict[str, int] = {}
+
+    def on_write(self, path: str, content: str) -> None:
+        if path:
+            self.files[path] = len(content.splitlines())
+            self.refresh_view()
+
+    def clear(self) -> None:
+        self.files.clear()
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        if not self.files:
+            self.empty("(本轮没改文件)")
+            return
+        width = max(self.content_size.width, 20)
+        rows = []
+        for path, lines in self.files.items():
+            line = Text()
+            line.append(" M ", style=S_ADD)
+            # 路径太长时砍前面留后面 —— 文件名比目录有信息量
+            shown = path if len(path) <= width - 9 else "…" + path[-(width - 10):]
+            line.append(shown.ljust(max(width - 9, 4)), style=S_LABEL)
+            line.append(f"+{lines}", style=S_DIM)
+            rows.append(line)
+        self.set_count(len(self.files), len(self.files))
+        self.body.update(Group(*rows))

@@ -13,21 +13,55 @@ import os
 
 from textual.theme import Theme
 
-# 低饱和的浅粉,接近角色发色。终端 ANSI 的 magenta 太冲,会比立绘脏一个档次,所以给真彩值。
-MOTION = "#EFA8C8"
+# ---- 调色板 ----------------------------------------------------------------
+# 三轮才落到这个位置,两个失败的极端都记下来,省得以后重来:
+#
+#   ① 九个面板各取渐变上的一点 → 九种颜色 → **游戏 HUD,不是工具**
+#   ② 全部收敛成同一个暗灰紫 + 纯黑底 → **整屏没对比,"这个也太黑了吧"**
+#
+# 落点:**颜色承担结构含义** —— 三栏三色,编码"你在哪一栏";三种色全部取自 logo
+# 那条色带,所以彩而不花。底色不用纯黑(纯黑配暗边框会糊成一片)。
+
+BG        = "#0E0D14"
+SURFACE   = "#15141D"
+MUTED     = "#6D82A4"   # 次级文字、gutter、竖线 —— 这些不跟着分栏变色
+TEXT      = "#E4E1EC"
+
+# 品牌色 —— 只出现在 logo 的渐变里,以及 focus / 状态
+PINK = "#FF9ED8"
+CYAN = "#7DE8E8"
+IRIS = "#9B8CFF"
+
+MOTION = PINK           # 正在动的东西:流式游标、running、`›` 提示符
+
+# **三栏三色 —— 颜色承担结构含义,而不是装饰。**
+# 试过两个极端都不行:九个面板九种渐变色 = 游戏 HUD;全部统一一个暗灰紫 = 太黑没对比。
+# 落点是让颜色**编码"你在哪一栏"**:一眼扫过去就知道左中右三个区域的边界在哪,
+# 而三种色又全部来自 logo 那条色带,所以整体仍然是同一个品牌。
+COL_LEFT   = IRIS       # 左栏:Status / Sessions / Thinking
+COL_MAIN   = CYAN       # 中栏:Content / 输入
+COL_RIGHT  = PINK       # 右栏:Tasks / Changes / MCP / Skills
+
+
+def _lerp(a: str, b: str, t: float) -> str:
+    t = max(0.0, min(t, 1.0))
+    ca = tuple(int(a[i:i + 2], 16) for i in (1, 3, 5))
+    cb = tuple(int(b[i:i + 2], 16) for i in (1, 3, 5))
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb))
+
 
 AEMEATH_THEME = Theme(
     name="aemeath",
-    primary=MOTION,          # 只给"正在动的东西"
-    secondary="#8FA8C4",     # 极弱的辅助光
-    accent=MOTION,
-    foreground="#E4E1EC",
-    background="#0E0D14",
-    surface="#15141D",
-    panel="#1C1A26",
-    success="#8CBF9E",
-    warning="#D9B86A",
-    error="#D96A72",         # 红只留给错误,不当装饰
+    primary=PINK,          # focus / running,仅此
+    secondary=IRIS,        # 兜底边框色(具体面板由 app 按栏覆盖)
+    accent=PINK,
+    foreground=TEXT,
+    background=BG,
+    surface=SURFACE,
+    panel=SURFACE,
+    success=CYAN,          # 只给真正的成功语义,不当装饰
+    warning="#D4B26B",
+    error="#E07A88",
     dark=True,
 )
 
@@ -55,18 +89,18 @@ _MONO = no_color()
 def _c(color: str, mono: str = "dim") -> str:
     return mono if _MONO else color
 
-MOTION_HEX = MOTION      # 粉:头发、飘带 —— 渐变起点
-GLOW_HEX   = "#7FC8DC"   # 冷青:腿部与飘带边缘的辉光
-STRUCT_HEX = "#5F7BA6"   # 藏青:裙摆、胸甲 —— 渐变终点
+MOTION_HEX = PINK   # logo 渐变起点
+GLOW_HEX   = CYAN   # 中段
+STRUCT_HEX = IRIS   # 终点
 
 S_DIM     = "dim"
-S_STRUCT  = _c(STRUCT_HEX)            # 藏青:gutter 竖线、结构线 —— 静止但有色
-S_LABEL   = _c("#8FA8C4")            # 冷青偏白:工具名、字段标签
-S_GLOW    = _c(GLOW_HEX)            # 冷青微光:极弱的辅助,用得很省
-S_MOTION  = _c(MOTION)               # 粉 = 正在动
-S_ERROR   = _c("#D96A72", "bold")
-S_WARN    = _c("#D9B86A", "bold")
-S_ADD     = _c("#8CBF9E")            # diff 的 + —— 唯一一处在错误之外用语义色
+S_STRUCT  = _c(MUTED)            # 藏青:gutter 竖线、结构线 —— 静止但有色
+S_LABEL   = _c(MUTED)            # 冷青偏白:工具名、字段标签
+S_GLOW    = _c(MUTED)      # 曾经的"辅助光",现在退回中性 —— 它不承载语义            # 冷青微光:极弱的辅助,用得很省
+S_MOTION  = _c(PINK)               # 粉 = 正在动
+S_ERROR   = _c("#E07A88", "bold")
+S_WARN    = _c("#D4B26B", "bold")
+S_ADD     = _c("#7FB093")  # diff 的 +,低饱和绿,不抢戏            # diff 的 + —— 唯一一处在错误之外用语义色
 
 APP_CSS = """
 Screen { background: $background; }
@@ -81,13 +115,14 @@ Screen { background: $background; }
    焦点面板边框变粉 —— 全屏永远只有一处是"活的"。 */
 .panel {
     border: round $secondary;
-    border-title-color: $secondary;
-    border-subtitle-color: $secondary;
+    border-title-color: $text-muted;
+    border-subtitle-color: $text-muted;
     padding: 0 1;
     background: $background;
     overflow-y: auto;
     scrollbar-size-vertical: 1;
 }
+/* 焦点/激活的面板抢回粉色 —— 全屏永远只有一处是"活的",它不参与渐变 */
 .panel:focus, .panel.-active {
     border: round $primary;
     border-title-color: $primary;
@@ -96,6 +131,7 @@ Screen { background: $background; }
 
 #p-status   { height: 6; }   /* 4 行内容:3 行文字 + 1 行留给电子故障的竖条 */
 #p-tasks    { height: 2fr; }   /* 右栏:当前进度最该看得全 */
+#p-changes  { height: 1fr; }
 #p-mcp      { height: 1fr; }
 #p-skills   { height: 1fr; }
 #p-sessions { height: 1fr; }
@@ -114,7 +150,7 @@ Screen { background: $background; }
 #goal:focus { border: none; }
 
 /* 底部键位提示 —— lazygit 的常驻契约行 */
-#hints { dock: bottom; height: 1; color: $secondary; padding: 0 1; }
+#hints { dock: bottom; height: 1; color: $text-muted; padding: 0 1; }
 
 /* content 区里的东西 */
 .answer { padding: 0; color: $text; height: auto; }

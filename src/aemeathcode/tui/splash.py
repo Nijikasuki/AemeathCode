@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import random
+from importlib.metadata import PackageNotFoundError, version
 
 from rich.cells import cell_len
 from rich.console import Console, ConsoleOptions, RenderResult
@@ -21,10 +22,11 @@ from rich.text import Text
 from aemeathcode.tui.theme import (
     GLOW_HEX,
     MOTION_HEX,
-    S_GLOW,
+    S_LABEL,
     S_MOTION,
     S_STRUCT,
     STRUCT_HEX,
+    _lerp,
 )
 
 TAGLINE = "远航星"
@@ -42,15 +44,18 @@ WORDMARK_SMALL = (
     "█▀█ ██▄ █ ▀ █ ██▄ █▀█  █  █▀█",
 )
 
-VERSION = "v0.2.1"
+def _version() -> str:
+    """从包元数据读,不在源码里再写一遍 —— 两处硬编码迟早对不上。"""
+    try:
+        return "v" + version("aemeathcode")
+    except PackageNotFoundError:      # 没安装(直接跑源码)时的兜底
+        return "v0.2.0"
 
 
-def _lerp(a: str, b: str, t: float) -> str:
-    """两个 hex 颜色之间线性插值。"""
-    t = max(0.0, min(t, 1.0))
-    ca = tuple(int(a[i:i + 2], 16) for i in (1, 3, 5))
-    cb = tuple(int(b[i:i + 2], 16) for i in (1, 3, 5))
-    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb))
+VERSION = _version()
+
+
+
 
 
 def _letter_spans(rows: tuple[str, ...]) -> list[tuple[int, int]]:
@@ -148,11 +153,10 @@ class Starfield:
         rng = random.Random(self._seed)
         pink = console.get_style(S_MOTION, default="")
         blue = console.get_style(S_STRUCT, default="")
-        glow = console.get_style(S_GLOW, default="")
-        # 三种亮度的点:大部分是最暗的那种
-        palette = [(Style(color=blue.color, dim=True), "·")] * 5 + \
-                  [(Style(color=glow.color, dim=True), "·")] * 3 + \
-                  [(Style(color=pink.color, dim=True), "·")] * 2 + \
+        text = console.get_style(S_LABEL, default="")
+        # 绝大多数是中性灰点,只有 1/10 是粉 —— 星野是背景,不是彩灯
+        palette = [(Style(color=blue.color, dim=True), "·")] * 7 + \
+                  [(Style(color=text.color, dim=True), "·")] * 2 + \
                   [(Style(color=pink.color), "✦")]
 
         for _ in range(max(height - self._top, 0)):
@@ -177,11 +181,11 @@ class Horizon:
         width = min(options.max_width - 4, 64)
         pink = console.get_style(S_MOTION, default="")
         blue = console.get_style(S_STRUCT, default="")
-        glow = console.get_style(S_GLOW, default="")
+        text = console.get_style(S_LABEL, default="")
         yield Segment("\n")
         yield Segment("  ")
         # 粉 → 冷青 → 藏青,三段渐变
-        for i, style in enumerate((pink, glow, blue)):
+        for i, style in enumerate((pink, text, blue)):
             seg = width // 3
             yield Segment("╌" * seg, Style(color=style.color, dim=(i > 0)))
         yield Segment("\n\n")
@@ -256,19 +260,20 @@ class Splash:
             yield Segment("\n")
 
         blue = console.get_style(S_STRUCT, default="")
-        glow = console.get_style(S_GLOW, default="")
+        text = console.get_style(S_LABEL, default="")
         # 版本号紧跟 logo 右下 —— opencode 就是这么放的
         yield Segment(" " * (left + max(block_w - cell_len(VERSION), 0)))
         yield Segment(VERSION, Style(color=blue.color, dim=True))
         yield Segment("\n\n")
         yield Segment(" " * (left + max((block_w - cell_len(TAGLINE)) // 2, 0)))
-        yield Segment(TAGLINE, Style(color=blue.color, dim=True))
+        yield Segment(TAGLINE, Style(color=blue.color))
         yield Segment("\n\n")
 
         for key, desc in SPLASH_COMMANDS:
+            # 命令名和说明都走中性灰 —— 空态是给人认路的,不是给人看色卡的
             yield Segment(" " * (left + max((block_w - cmd_w) // 2, 0)))
-            yield Segment(key.ljust(key_w + 2), Style(color=glow.color))
-            yield Segment(desc, Style(color=blue.color, dim=True))
+            yield Segment(key.ljust(key_w + 2), Style(color=text.color))
+            yield Segment(desc, Style(color=blue.color))
             yield Segment("\n")
 
 

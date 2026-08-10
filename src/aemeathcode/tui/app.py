@@ -44,6 +44,7 @@ from aemeathcode.tui import clipboard, splash
 from aemeathcode.tui.ledger import RULE, RULE_NESTED, SYM, LedgerFrame, LedgerRow, fit
 from aemeathcode.tui.panels import (
     ApprovalPane,
+    ChangesPanel,
     McpPanel,
     SessionsPanel,
     SkillsPanel,
@@ -55,6 +56,9 @@ from aemeathcode.tui.render import event_row
 from aemeathcode.tui.theme import (
     AEMEATH_THEME,
     APP_CSS,
+    COL_LEFT,
+    COL_MAIN,
+    COL_RIGHT,
     S_ERROR,
     S_MOTION,
     S_STRUCT,
@@ -73,7 +77,6 @@ from aemeathcode.tui.widgets import (
 HIDDEN_TYPES = {"run.started"}      # goal 已经由输入回显过了,重复
 # /sessions 删掉了:Sessions 面板常驻可见,它没有任何 /resume 之外的作用
 COMMANDS = ["/resume", "/clear", "/usage", "/mcp", "/about", "/help", "/exit"]
-VERSION = "v0.2.1"
 # identity 决策 3 原文是"≤1 帧"—— 但实测 60ms 作用在角落一个三字标签上,人眼来不及,
 # 等于没做。130ms 仍然只是"闪一下"、不构成动画,但确实看得见。
 SHEEN_STEP = 0.08     # logo 流光的帧间隔(~12fps),只在空态跑
@@ -126,6 +129,7 @@ class AemeathApp(App):
         self.p_sessions = SessionsPanel()
         self.p_mcp = McpPanel()
         self.p_skills = SkillsPanel()
+        self.p_changes = ChangesPanel()
         self.approval = ApprovalPane()
         # content 区的流式块
         self._answer: AnswerBlock | None = None
@@ -168,6 +172,7 @@ class AemeathApp(App):
                     )
             with Vertical(id="aside"):
                 yield self.p_tasks
+                yield self.p_changes
                 yield self.p_mcp
                 yield self.p_skills
         yield Static(Text(HINTS, style=S_STRUCT), id="hints")
@@ -177,20 +182,38 @@ class AemeathApp(App):
         self.theme = "aemeath"
         content = self.query_one("#content", Vertical)
         content.border_title = "Content"
-        content.border_subtitle = VERSION
+        content.border_subtitle = splash.VERSION
         self.query_one("#input-panel", Horizontal).border_title = "›"
         # 每个房间开局就有内容,不留黑洞
         self.p_tasks.refresh_view()
+        self.p_changes.refresh_view()
         self.p_mcp.refresh_view()
         self.p_skills.refresh_view()
         self.p_thinking.clear()
         self.p_sessions.refresh_view()
         self._refresh_status()
+        self._paint_borders()
         self._mount_splash()
         self.query_one("#goal", Input).focus()
         self.run_worker(self._connect)
         self.set_interval(1.0, self._tick)
         self.set_interval(SHEEN_STEP, self._sheen)
+
+    # 三栏三色:颜色编码"你在哪一栏",不是九个面板九个色。
+    # 三种都取自 logo 那条色带,所以彩而不花。
+    COLUMNS = (
+        (COL_LEFT, ("#p-status", "#p-sessions", "#p-thinking")),
+        (COL_MAIN, ("#content", "#input-panel")),
+        (COL_RIGHT, ("#p-tasks", "#p-changes", "#p-mcp", "#p-skills")),
+    )
+
+    def _paint_borders(self) -> None:
+        for color, selectors in self.COLUMNS:
+            for selector in selectors:
+                node = self.query_one(selector)
+                node.styles.border = ("round", color)
+                node.styles.border_title_color = color
+                node.styles.border_subtitle_color = color
 
     # ---- 面板刷新 ----
 
@@ -412,6 +435,8 @@ class AemeathApp(App):
         # 任务板从工具参数里就地推导 —— daemon 没有 task.* 的 RPC,事件流里信息已经够了
         if self.p_tasks.on_tool(name, params):
             self.p_tasks.refresh_view()
+        if name == "write_file":
+            self.p_changes.on_write(str(params.get("path", "")), str(params.get("content", "")))
         if name == "use_skill":
             self.p_skills.used(str(params.get("name", "")))
 
@@ -535,6 +560,7 @@ class AemeathApp(App):
         self._end_answer()
         self.p_thinking.clear()
         self.p_tasks.clear()      # 任务板是"这一轮在干什么",不该留着上一轮的
+        self.p_changes.clear()
         self._set_state("running")
         self._run_start = time.monotonic()
         ack = await self._client.send_command(
@@ -543,11 +569,14 @@ class AemeathApp(App):
         self._top_run_id = ack.get("run_id")
         self._view.scroll_end(animate=False)
 
-    async def _echo_user(self, text: str) -> None:
-        # 空态是垂直居中的,一有内容就该退场,否则中间那块留白会一直顶着
+    def _clear_splash(self) -> None:
+        """空态占满整个视口(height: 1fr),不撤掉的话后面挂进来的内容全被挤出可视区。"""
         if self._splash is not None:
             self._splash.remove()
             self._splash = None
+
+    async def _echo_user(self, text: str) -> None:
+        self._clear_splash()
         self._transcript.append(f"› {text}")
         await self._view.mount(Static(LedgerRow("", ""), classes="gap"))
         await self._view.mount(Static(
@@ -558,6 +587,8 @@ class AemeathApp(App):
     # ---- 斜杠命令 ----
 
     async def _handle_command(self, text: str) -> None:
+        if text != "/clear":
+            self._clear_splash()      # 命令的输出同样会被 1fr 的空态挤没
         view = self._view
         if text == "/resume":
             await self._load_sessions()
@@ -596,12 +627,12 @@ class AemeathApp(App):
     async def _show_about(self) -> None:
         """`/about` —— 全项目唯一出现她的地方(identity 决策 4:只在显式召唤下现形)。
 
-        窄屏降级是决策的一部分,不是可选优化:宽 < 64 或高 < 34 就只出文字。
+        只有 wordmark + 版本 / model / session / context。**没有角色形象** ——
+        三次实测都糊到"远看勉强认得出",见 identity.md 已定问题 4。
         """
         view = self._view
-        size = self.query_one("#content", Vertical).content_size
-        if size.width >= 64 and size.height >= 20:
-            await self._mount(view, Static(splash.Wordmark(), classes="about"))
+        anchor = view.virtual_size.height     # 记住 about 块的起点,末尾滚回这里
+        await self._mount(view, Static(splash.Wordmark(), classes="about"))
         rows = [
             (f"AemeathCode  {splash.VERSION}", ""),
             ("一个轻量、可观察、可修改的 Coding Agent Runtime", "dim"),
@@ -612,6 +643,7 @@ class AemeathApp(App):
         ]
         for content, style in rows:
             await self._mount(view, EventRow("", Text(content, style=style)))
+        self.call_after_refresh(lambda: view.scroll_to(y=anchor, animate=False))
 
     def _reset_run_state(self) -> None:
         self._spawns.clear()
@@ -749,6 +781,7 @@ class AemeathApp(App):
         await self._view.remove_children()
         self._reset_run_state()
         self.p_tasks.clear()
+        self.p_changes.clear()
         self.p_skills.clear()
         self.p_thinking.clear()
         self._ctx_used = sum(_estimate_msg_tokens(m) for m in resp["history"])
