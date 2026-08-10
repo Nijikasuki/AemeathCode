@@ -1,41 +1,82 @@
 """Aemeath 交互式 TUI 客户端 —— 编排层。
 
-只干三件事:①连上 core ②把事件流分发成界面上的块 ③处理输入。
-外观在 theme.py,组件在 widgets.py,事件文案在 render.py。
+只干三件事:①连上 core ②把事件流分发到各个面板 ③处理输入。
+面板在 panels.py,content 区的行渲染在 widgets.py / ledger.py,外观在 theme.py。
 
-界面 = 顶部状态条 + 滚动日志区 + 底部输入框。
-注意:每次回车都是一个【独立的 run】,不携带上一轮的对话历史
-(跨轮会话记忆属于后续阶段)。
+布局(lazygit 式的多区域,不是聊天窗口):
+
+    ┌ Status ────┐┌ Content ─────────────────────┐
+    │            ││                              │
+    ├ Tasks ─────┤│   LOGO / 对话 / 工具活动      │
+    │            ││                              │
+    ├ Thinking ──┤│                              │
+    │            ││                              │
+    ├ Sessions ──┤└──────────────────────────────┘
+    │            │┌ › ───────────────────────────┐
+    └────────────┘└──────────────────────────────┘
+     ^p/^n 选会话 · ^u/^d 滚动 · /resume · ^q 退出            ░ 4%
+
+从 lazygit 学来的三条原则、以及为什么它们对 coding agent 成立,见 panels.py 的模块 docstring。
+最关键的一手是**把 thinking 拎成独立面板** —— 它一直可见,但物理上淹不了正文。
+
+输入是**常驻直接打字**(不是 lazygit 的模式化导航),代价是单键留给输入,
+导航走斜杠命令和 Ctrl 组合键。对 agent 来说随手能打字比 vim 手感更重要。
 """
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 
+from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Vertical, VerticalScroll
-from textual.screen import ModalScreen
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.suggester import SuggestFromList
-from textual.widgets import Collapsible, Input, Label, OptionList, Static
-from textual.widgets.option_list import Option
+from textual.widget import Widget
+from textual.widgets import Input, Static
 
 from aemeathcode.core.compact.budget import context_window
 from aemeathcode.core.config import get_config
 from aemeathcode.transport.socket_client import SocketClient
-from aemeathcode.tui.render import event_markup
-from aemeathcode.tui.theme import AEMEATH_THEME, APP_CSS, BANNER
-from aemeathcode.tui.widgets import CompactionIndicator, LLMStreamBlock, ToolCallBlock
+from aemeathcode.tui import splash
+from aemeathcode.tui.ledger import RULE, RULE_NESTED, SYM, LedgerFrame, LedgerRow, fit
+from aemeathcode.tui.panels import (
+    McpPanel,
+    SessionsPanel,
+    SkillsPanel,
+    StatusPanel,
+    TasksPanel,
+    ThinkingPanel,
+)
+from aemeathcode.tui.render import event_row
+from aemeathcode.tui.theme import (
+    AEMEATH_THEME,
+    APP_CSS,
+    S_ERROR,
+    S_MOTION,
+    S_STRUCT,
+    S_WARN,
+)
+from aemeathcode.tui.widgets import (
+    AnswerBlock,
+    EventRow,
+    SubagentBlock,
+    ToolCall,
+    ToolGroup,
+    ToolRow,
+    is_readonly,
+)
 
-# 流式增量事件(要拼接成一段),其余事件都是"一次成型的一行"
-STREAM_TYPES = {"llm.thinking", "llm.token"}
-
-# 不在 TUI 里显示的事件:run.started 的 goal 已经由输入回显过了,重复
-HIDDEN_TYPES = {"run.started"}
+HIDDEN_TYPES = {"run.started"}      # goal 已经由输入回显过了,重复
+# /sessions 删掉了:Sessions 面板常驻可见,它没有任何 /resume 之外的作用
+COMMANDS = ["/resume", "/clear", "/usage", "/mcp", "/help", "/exit"]
+VERSION = "v0.2.1"
+HINTS = "^↑/^↓ 选会话 · Enter 恢复 · ^u/^d 滚动 content · ^j/^k 滚动 thinking · ^q 退出"
 
 
 def _elapsed_ms(start_iso: str | None, end_iso: str | None) -> int:
-    """由两个事件的 ts 算出工具耗时。"""
     if not start_iso or not end_iso:
         return 0
     try:
@@ -45,579 +86,624 @@ def _elapsed_ms(start_iso: str | None, end_iso: str | None) -> int:
         return 0
 
 
-class SessionPicker(ModalScreen[str | None]):
-    """模态弹层:列出会话,↑↓ 选、Enter 返回选中的完整 session_id、Esc 取消返回 None。"""
-
-    BINDINGS = [("escape", "dismiss_none", "取消")]
-
-    DEFAULT_CSS = """
-    SessionPicker {
-        align: center middle;
-    }
-    SessionPicker #picker-box {
-        width: 80%;
-        max-width: 100;
-        height: auto;
-        max-height: 80%;
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    SessionPicker #picker-title {
-        margin-bottom: 1;
-    }
-    """
-
-    def __init__(self, sessions: list) -> None:
-        super().__init__()
-        self._sessions = sessions
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="picker-box"):
-            yield Label("选择要恢复的会话  ( ↑↓ 选择 · Enter 确认 · Esc 取消 )", id="picker-title")
-            options = [
-                Option(self._label(s), id=s.get("id"))
-                for s in self._sessions
-            ]
-            yield OptionList(*options, id="picker-list")
-
-    @staticmethod
-    def _label(s: dict) -> str:
-        updated = (s.get("updated_at") or "")[:19]
-        title = s.get("title") or "(无标题)"
-        short = (s.get("id") or "")[:8]
-        return f"{title}    {updated}    {short}"
-
-    def on_mount(self) -> None:
-        self.query_one("#picker-list", OptionList).focus()
-
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(event.option.id)   # 返回选中会话的完整 id
-
-    def action_dismiss_none(self) -> None:
-        self.dismiss(None)
-
-
 class PermissionPrompt(Vertical):
-    """内联权限请求:不覆盖整屏,直接嵌进对话流(#log)里,跟在那条工具调用下面,
-    像 Claude Code。用户选完,resolve 传进来的 Future,再把自己从对话里移除。
-    选项 id 就是 decision(allow_once/allow_always/deny);1/2/3 数字键 + ↑↓ Enter 都能选,Esc=deny。"""
+    """内联权限请求 —— 跟在那条工具调用下面,不覆盖整屏、不加边框、不填色块。
 
-    BINDINGS = [
-        ("1", "pick('allow_once')", "允许一次"),
-        ("2", "pick('allow_always')", "总是允许"),
-        ("3", "pick('deny')", "拒绝"),
-        ("escape", "pick('deny')", "拒绝"),
-    ]
-
-    DEFAULT_CSS = """
-    PermissionPrompt {
-        height: auto;
-        border: round $warning;
-        padding: 0 1;
-        margin: 1 0;
-    }
-    PermissionPrompt #perm-head { color: $warning; }
-    PermissionPrompt #perm-detail { color: $text-muted; margin-bottom: 1; }
-    PermissionPrompt OptionList { height: auto; background: transparent; }
+    审批需要上下文(哪个 tool、什么命令),所以留在 content 里而不是做成固定面板;
+    "找不到它在哪"由自动滚动 + Status 面板的状态解决。
     """
 
-    def __init__(self, ask: dict, future: "asyncio.Future[str]") -> None:
+    DEFAULT_CSS = "PermissionPrompt { height: auto; }"
+    OPTIONS = (("allow_once", "允许一次"), ("allow_always", "总是允许"), ("deny", "拒绝"))
+
+    def __init__(self, ask: dict, future: "asyncio.Future[str]", *, skip_detail: str = "") -> None:
         super().__init__()
         self._ask = ask
         self._future = future
+        self._skip = skip_detail
 
     def compose(self) -> ComposeResult:
         tool = self._ask.get("tool_name", "")
         detail = self._ask.get("detail", "")
-        yield Label(f"⏵ 权限请求 · 工具 [bold]{tool}[/bold]", id="perm-head")
-        yield Static(detail or "(无详情)", id="perm-detail")
-        yield OptionList(
-            Option("1. 允许一次", id="allow_once"),
-            Option("2. 总是允许(记住,不再询问)", id="allow_always"),
-            Option("3. 拒绝", id="deny"),
-            id="perm-options",
-        )
+        head = Text()
+        head.append(f"{tool}  ", style="bold")
+        head.append("需要授权", style=S_WARN)
+        yield Static(LedgerRow(SYM["ask"], head, gutter_style=S_WARN))
+        if detail and detail.strip() != self._skip.strip():
+            yield Static(LedgerRow("", Text(detail, style="dim"), indent=2))
+        choices = Text()
+        for i, (_, label) in enumerate(self.OPTIONS):
+            choices.append(f"  {i + 1} ", style=S_MOTION)
+            choices.append(f"{label}     ", style="bold")
+        yield Static(LedgerRow("", choices, indent=2))
 
-    def on_mount(self) -> None:
-        self.query_one("#perm-options", OptionList).focus()
-
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        self.action_pick(event.option.id)
-
-    def action_pick(self, decision: str) -> None:
+    def decide(self, decision: str) -> None:
         if not self._future.done():
             self._future.set_result(decision)
-        self.remove()   # 选完把自己从对话流里撤掉
+        self.remove()
 
 
 class AemeathApp(App):
     CSS = APP_CSS
-    BINDINGS = [("ctrl+q", "quit", "退出")]
+    # Textual 自带 ctrl+p = 命令面板,会把我们的绑定吃掉,直接关掉
+    ENABLE_COMMAND_PALETTE = False
+    # priority=True 是必须的:焦点在 Input 上,而 Input 自己绑了 ctrl+u(删到行首)、
+    # ctrl+k(删到行尾)。按键沿焦点链冒泡,App 在最末端,不给优先级就永远收不到。
+    BINDINGS = [  # noqa: RUF012 —— Textual 的类属性约定
+        Binding("ctrl+q", "quit", "退出", priority=True),
+        Binding("ctrl+up", "session_prev", "上一个会话", priority=True),
+        Binding("ctrl+down", "session_next", "下一个会话", priority=True),
+        Binding("ctrl+u", "scroll_up", "content 上滚", priority=True),
+        Binding("ctrl+d", "scroll_down", "content 下滚", priority=True),
+        Binding("ctrl+k", "think_up", "thinking 上滚", priority=True),
+        Binding("ctrl+j", "think_down", "thinking 下滚", priority=True),
+    ]
 
     def __init__(self) -> None:
         super().__init__()
         self._client: SocketClient | None = None
-        self._session_id: str | None = None         # 连上后 create 一次,之后每次 run 复用
-        self._block: LLMStreamBlock | None = None   # 当前活跃的流式块
-        self._stream_type: str | None = None        # 当前在流哪一种
-        # tool_use_id → (块, 开始时间);结果事件后到,靠它找回对应的块
-        self._tools: dict[str, tuple[ToolCallBlock, str]] = {}
-        self._model: str = get_config().model                 # 顶部显示 + 查窗口用
-        self._show_thinking: bool = get_config().show_thinking  # UI 是否显示 thinking(config 开关)
-        self._window: int = context_window(self._model)       # 当前模型的上下文窗口
-        self._status_markup: str = "[dim]connecting…[/dim]"  # 状态段(ready/running/idle…)
-        self._ctx_used: int = 0                               # 当前水位条显示的 used(动画起点)
-        self._pending_compaction: bool = False               # 刚压缩过?下一次水位更新走下降动画
-        self._compaction_widget: CompactionIndicator | None = None  # 压缩进行中的指示器
-        self._ctx_markup: str = self._ctx_bar(0, self._window)  # 水位段,一开始就是 0%
-        self._top_run_id = None
-        # 子 agent 嵌套渲染:spawn 的 tool_use_id → 折叠块;子 run_id → 折叠块(subagent.started 建立)
-        self._spawn_blocks: dict[str, Collapsible] = {}
-        self._sub_containers: dict[str, Collapsible] = {}
-        self._sess_in = self._sess_out = self._sess_cache = 0   # 本会话累计 token(状态栏右侧)
-        self._run_start: float | None = None                    # 顶层 run 开始时刻(monotonic),None=不在跑
-        self._running_subs: dict[Collapsible, float] = {}        # 正在跑的子 agent 折叠块 → 开始时刻
+        self._connected = False      # 读循环活着才为 True(P1-1:断连后别再 await 永久挂起)
+        self._session_id: str | None = None
+        self._model: str = get_config().model
+        self._show_thinking: bool = get_config().show_thinking
+        self._window: int = context_window(self._model)
+        self._ctx_used = 0
+        self._state = "connecting"
+        # 左侧四个房间
+        self.p_status = StatusPanel()
+        self.p_tasks = TasksPanel()
+        self.p_thinking = ThinkingPanel()
+        self.p_sessions = SessionsPanel()
+        self.p_mcp = McpPanel()
+        self.p_skills = SkillsPanel()
+        # content 区的流式块
+        self._answer: AnswerBlock | None = None
+        self._streaming = False
+        self._splash: Static | None = None
+        # tool 分组
+        self._group: ToolGroup | None = None
+        self._group_started = 0.0
+        self._calls: dict[str, tuple[ToolCall, Widget]] = {}
+        self._last_target = ""
+        # subagent 嵌套
+        self._spawns: dict[str, SubagentBlock] = {}
+        self._sub_runs: dict[str, SubagentBlock] = {}
+        # run 计时
+        self._top_run_id: str | None = None
+        self._run_start: float | None = None
+        self._pending_perm: PermissionPrompt | None = None
+
+    # ---- 布局 ----
 
     def compose(self) -> ComposeResult:
-        yield Label("[bold]AemeathCode[/bold]  [dim]connecting…[/dim]", id="status")
-        yield VerticalScroll(id="log")
-        yield Input(
-            placeholder="输入目标回车执行  ·  / 命令(灰字提示,→ 补全)  ·  Ctrl+Q 退出",
-            id="goal",
-            suggester=SuggestFromList(["/sessions", "/resume", "/clear", "/usage", "/mcp", "/exit"], case_sensitive=False),
-        )
+        with Horizontal(id="body"):
+            with Vertical(id="side"):
+                yield self.p_status
+                yield self.p_sessions
+                yield self.p_thinking
+            with Vertical(id="main"):
+                with Vertical(id="content", classes="panel"):
+                    yield VerticalScroll(id="content-body")
+                with Horizontal(id="input-panel", classes="panel"):
+                    yield Input(
+                        placeholder="输入目标回车执行  ·  / 命令",
+                        id="goal",
+                        suggester=SuggestFromList(COMMANDS, case_sensitive=False),
+                    )
+            with Vertical(id="aside"):
+                yield self.p_tasks
+                yield self.p_mcp
+                yield self.p_skills
+        yield Static(Text(HINTS, style=S_STRUCT), id="hints")
 
     def on_mount(self) -> None:
         self.register_theme(AEMEATH_THEME)
         self.theme = "aemeath"
-        self.query_one("#log", VerticalScroll).mount(Static(BANNER, id="banner"))
+        content = self.query_one("#content", Vertical)
+        content.border_title = "Content"
+        content.border_subtitle = VERSION
+        self.query_one("#input-panel", Horizontal).border_title = "›"
+        # 每个房间开局就有内容,不留黑洞
+        self.p_tasks.refresh_view()
+        self.p_mcp.refresh_view()
+        self.p_skills.refresh_view()
+        self.p_thinking.clear()
+        self.p_sessions.refresh_view()
+        self._refresh_status()
+        self._mount_splash()
         self.query_one("#goal", Input).focus()
         self.run_worker(self._connect)
-        self.set_interval(1.0, self._tick)   # 每秒刷新运行中计时器(主 run + 子 agent)
+        self.set_interval(1.0, self._tick)
 
-    # ---- 小工具 ----
+    # ---- 面板刷新 ----
 
-    def _render_status(self) -> None:
-        line = f"[bold]AemeathCode[/bold]  [dim]{self._model}[/dim]  {self._status_markup}"
-        if self._ctx_markup:
-            line += f"   {self._ctx_markup}"
-        line += (f"   [dim]Σ {self._fmt_tokens(self._sess_in)}↑ "
-                 f"{self._fmt_tokens(self._sess_out)}↓ ⚡{self._fmt_tokens(self._sess_cache)}[/dim]")   # 累计 in↑/out↓/cache命中⚡(含子 agent)
-        self.query_one("#status", Label).update(line)
+    def _refresh_status(self) -> None:
+        self.p_status.render_status(
+            cwd=os.path.basename(os.getcwd()) or os.getcwd(),
+            model=self._model or "",
+            state=self._state_label(),
+            session=self._session_id or "",
+        )
+        self.query_one("#hints", Static).update(self._hints_line())
 
-    def _set_status(self, markup: str) -> None:
-        self._status_markup = markup
-        self._render_status()
+    def _state_label(self) -> str:
+        if self._state == "running" and self._run_start is not None:
+            return f"running {int(time.monotonic() - self._run_start)}s"
+        return {
+            "connecting": "连接中", "ready": "就绪", "idle": "就绪",
+            "ask": "等待授权", "disconnected": "disconnected", "failed": "失败",
+        }.get(self._state, self._state)
 
-    def _set_ctx(self, markup: str) -> None:
-        self._ctx_markup = markup
-        self._render_status()
+    def _hints_line(self) -> Text:
+        """底部常驻契约行 —— lazygit 的可发现性来源:永远知道能按什么。"""
+        pct = self._ctx_used / self._window if self._window else 0.0
+        bar = "▓" if pct >= 0.85 else ("▒" if pct >= 0.60 else "░")
+        line = Text(HINTS, style=S_STRUCT)
+        line.append(f"    {bar} {pct * 100:.0f}%", style=S_WARN if pct >= 0.6 else S_STRUCT)
+        return line
+
+    def _set_state(self, state: str) -> None:
+        self._state = state
+        self._refresh_status()
 
     def _tick(self) -> None:
-        """每秒跑一次:给正在运行的主 run / 子 agent 更新"已跑 N 秒"。都不在跑时啥也不做。"""
-        now = time.monotonic()
-        if self._run_start is not None:
-            self._set_status(f"[$accent]running… {int(now - self._run_start)}s[/$accent]")
-        for collapsible, start in self._running_subs.items():
-            base = getattr(collapsible, "_base_title", "🤖 子 agent")
-            collapsible.title = f"{base} · 运行中 {int(now - start)}s"
+        if self._state == "running":
+            self._refresh_status()
 
-    @staticmethod
-    def _fmt_tokens(n: int) -> str:
-        """token 数变人话:1_180_000→1.2M,118_000→118k,3200→3.2k,500→500。"""
-        if n >= 1_000_000:
-            return f"{n / 1e6:.1f}M"
-        if n >= 1_000:
-            return f"{n / 1e3:.1f}k" if n < 10_000 else f"{n / 1e3:.0f}k"
-        return str(n)
-
-    @classmethod
-    def _ctx_bar(cls, used: int, window: int) -> str:
-        """把水位 used/window 渲染成一根 10 格进度条 + 百分比 + 绝对 token 数,按占比变色。
-        1M 窗口下真实占用常不足 1%,光看百分比像没动,所以带上绝对值(如 9.0k/1M)。"""
-        pct = used / window if window else 0.0
-        pct = max(0.0, min(pct, 1.0))
-        filled = round(pct * 10)
-        bar = "▓" * filled + "░" * (10 - filled)
-        color = "$success" if pct < 0.6 else ("$warning" if pct < 0.85 else "$error")
-        return (
-            f"[dim]ctx[/dim] [{color}]{bar}[/{color}] "
-            f"[{color}]{pct * 100:.0f}%[/{color}] "
-            f"[dim]{cls._fmt_tokens(used)}/{cls._fmt_tokens(window)}[/dim]"
-        )
-
-    def _show_ctx(self, used: int) -> None:
-        """瞬时更新水位条(记住当前值,给动画当起点)。"""
-        self._ctx_used = used
-        self._set_ctx(self._ctx_bar(used, self._window))
-
-    def _remove_compaction_widget(self) -> None:
-        if self._compaction_widget is not None:
-            self._compaction_widget.remove()
-            self._compaction_widget = None
-
-    def _animate_ctx_to(self, target: int) -> None:
-        """压缩后水位下降:从当前值分帧滑到 target(~0.7s),让"掉下去"看得见。"""
-        start = self._ctx_used
-        if start == target:
-            self._show_ctx(target)
+    def _mount_splash(self) -> None:
+        name = os.environ.get("AEMEATH_SPLASH", "full")
+        if name == "none":
             return
-        steps = 12
-        self._anim_step = 0
+        self._splash = Static(splash.make(name), id="splash")
+        self._view.mount(self._splash)
 
-        def tick() -> None:
-            self._anim_step += 1
-            cur = round(start + (target - start) * self._anim_step / steps)
-            self._show_ctx(cur)
+    # ---- content 区 ----
 
-        self.set_interval(0.06, tick, repeat=steps)   # 12 帧 × 0.06s ≈ 0.7s,跑完自动停
+    @property
+    def _view(self) -> VerticalScroll:
+        return self.query_one("#content-body", VerticalScroll)
 
-    def _end_block(self) -> None:
-        """当前流式段落定格(触发 Markdown 重渲染)。"""
-        if self._block is not None:
-            self._block.finalize()
-        self._block = None
-        self._stream_type = None
+    def _container_for(self, event: dict) -> tuple[Widget, str]:
+        """按 run_id 决定往哪挂:子 agent 的事件进它的 body(嵌套 + 换竖线字符)。"""
+        block = self._sub_runs.get(event.get("run_id"))
+        if block is not None:
+            return block.body, RULE_NESTED
+        return self._view, RULE
 
-    # ---- 连接与事件 ----
+    def _close_group(self) -> None:
+        if self._group is not None:
+            self._group.close(int((time.monotonic() - self._group_started) * 1000))
+            self._group = None
+
+    def _end_answer(self) -> None:
+        if self._answer is not None:
+            self._answer.finalize()
+            self._answer = None
+        self._streaming = False
+
+    # ---- 连接 ----
 
     async def _connect(self) -> None:
         config = get_config()
-        view = self.query_one("#log", VerticalScroll)
         client = SocketClient(config.host, config.port)
         try:
             await client.connect()
         except OSError as e:
-            self._set_status("[$error]disconnected[/$error]")
-            await view.mount(Static(f"连不上 core ({config.host}:{config.port}): {e}", classes="sys"))
-            await view.mount(Static("请先在另一个终端运行: aemeath core", classes="sys"))
+            self._set_state("disconnected")
+            await self._view.mount(EventRow(SYM["error"], Text(str(e), style=S_ERROR)))
+            await self._view.mount(EventRow("", Text("重连: aemeath core", style="dim")))
             return
 
         client.on_event(self._on_event)
         client.on_ask(self._prompt_permission)
         self._client = client
-
-        # 读循环必须【先】并发跑起来:send_command 的响应正是靠它读到再唤醒 Future。
-        # 所以把它丢到后台 worker,而不是在这一行阻塞等它。
+        self._connected = True
+        # 读循环必须【先】并发跑起来:send_command 的响应正是靠它读到再唤醒 Future
         self.run_worker(self._read_loop)
-
-        # 现在有人在读了 → 才能发 session.create 并 await 到它的响应。
         try:
             resp = await client.send_command("session.create", {})
             self._session_id = resp["session_id"]
         except Exception as e:  # noqa: BLE001
-            self._set_status("[$error]session 创建失败[/$error]")
-            await view.mount(Static(f"创建会话失败: {e}", classes="sys"))
+            self._set_state("failed")
+            await self._view.mount(EventRow(SYM["error"], Text(str(e), style=S_ERROR)))
             return
-
-        self._set_status(
-            f"[dim]{config.host}:{config.port}[/dim]  [$success]ready[/$success]  "
-            f"[dim]session {self._session_id[:8]}[/dim]"
-        )
+        self._set_state("ready")
+        await self._load_sessions()
+        await self._load_mcp()
 
     async def _read_loop(self) -> None:
-        """常驻读循环单独占一个 worker:与 send_command 并发,负责读响应/派发事件。"""
         assert self._client is not None
         await self._client.run_event_loop()
-        self._set_status("[$error]disconnected[/$error]")
+        # P1-1:读循环一死就置断连标志。否则 send_command 照样挂 Future 并 await,
+        # 而唯一能 resolve 它的读路径已经没了 → 永久挂起。
+        self._connected = False
+        self._set_state("disconnected")
+        await self._view.mount(
+            EventRow(SYM["error"], Text("core 已断开。重连: aemeath core", style=S_ERROR))
+        )
+        self._view.scroll_end(animate=False)
 
-    def _container_for(self, event: dict):
-        """按事件的 run_id 决定 mount 到哪:子 agent 的事件进它折叠块的 body(嵌套缩进),否则进主日志。"""
-        collapsible = self._sub_containers.get(event.get("run_id"))
-        if collapsible is not None:
-            return collapsible.query_one(Collapsible.Contents)
-        return self.query_one("#log", VerticalScroll)
+    async def _load_mcp(self) -> None:
+        if self._client is None:
+            return
+        try:
+            resp = await self._client.send_command("mcp.list", {})
+        except Exception:  # noqa: BLE001
+            return
+        self.p_mcp.load(resp.get("servers", []))
+
+    async def _load_sessions(self) -> None:
+        if self._client is None:
+            return
+        try:
+            resp = await self._client.send_command("session.list", {})
+        except Exception:  # noqa: BLE001
+            return
+        self.p_sessions.load(resp.get("sessions", []))
+
+    # ---- 事件分发 ----
 
     async def _on_event(self, event: dict) -> None:
         etype = event.get("type")
 
-        # 水位事件:只更新顶部状态条,不往日志区刷屏(它每轮都来)
         if etype == "context.usage":
-            self._window = event.get("window", self._window)   # 以 daemon 的窗口为准
-            used = event.get("used", 0)
-            if self._pending_compaction:
-                self._pending_compaction = False
-                self._animate_ctx_to(used)                     # 刚压缩过 → 平滑下降,看得见
-            else:
-                self._show_ctx(used)                           # 平时瞬时更新
+            self._window = event.get("window", self._window)
+            self._ctx_used = event.get("used", 0)
+            self._refresh_status()
             return
 
-        # 链接事件:纯粹给父子建映射,不渲染成行。用 parent_tool_use_id 找到 spawn 折叠块,
-        # 记下"这个子 run_id 的事件都往那个块里塞"。
         if etype == "subagent.started":
-            collapsible = self._spawn_blocks.get(event.get("parent_tool_use_id"))
-            if collapsible is not None:
-                self._sub_containers[event.get("run_id")] = collapsible
+            block = self._spawns.get(event.get("parent_tool_use_id"))
+            if block is not None:
+                self._sub_runs[event.get("run_id")] = block
             return
 
-        # thinking 显示开关:关了就直接丢掉 thinking 事件(daemon 照常发,只是 UI 不画)
-        if etype == "llm.thinking" and not self._show_thinking:
+        # thinking 进它自己的房间,不进 content —— 这是整套布局最关键的一条:
+        # 它一直可见,但物理上淹不了正文
+        if etype == "llm.thinking":
+            if self._show_thinking:
+                self.p_thinking.append(event.get("content", ""))
             return
 
-        log = self.query_one("#log", VerticalScroll)   # 滚动始终针对主日志
-        container = self._container_for(event)          # mount 目标:子事件进折叠块,否则主日志
+        container, rule = self._container_for(event)
 
-        if etype in STREAM_TYPES:
-            # 换段了(或刚开始)→ 上一段定格,新建一个块挂上去
-            if self._block is None or self._stream_type != etype:
-                self._end_block()
-                thinking = etype == "llm.thinking"
-                self._block = LLMStreamBlock(
-                    markdown=not thinking,               # 只有回答需要 Markdown
-                    classes="thinking" if thinking else "answer",
-                )
-                await container.mount(self._block)
-                self._stream_type = etype
-            # 累加+更新每个流式事件都要做,不能包进上面的 if
-            self._block.append_token(event.get("content", ""))
-
+        if etype == "llm.token":
+            await self._on_answer(event, container, rule)
         elif etype == "tool.call_started":
-            self._end_block()
-            if event.get("tool_name") == "spawn_agent":
-                # 子 agent:建一个可折叠块,它的所有事件之后都塞进这个块的 body(嵌套)
-                goal = str(event.get("params", {}).get("goal", ""))[:40]
-                base = f"🤖 子 agent · {goal}…"
-                collapsible = Collapsible(title=f"{base} · 运行中", collapsed=False, classes="subagent")
-                collapsible._spawn_start_ts = event.get("ts", "")   # 记开始时刻(ISO),子跑完算最终耗时
-                collapsible._base_title = base                       # 计时器每秒重写标题时用
-                self._spawn_blocks[event.get("tool_use_id", "")] = collapsible
-                self._running_subs[collapsible] = time.monotonic()   # 加入运行中计时
-                await container.mount(collapsible)
-            else:
-                block = ToolCallBlock(event.get("tool_name", ""), event.get("params", {}))
-                self._tools[event.get("tool_use_id", "")] = (block, event.get("ts", ""))
-                await container.mount(block)
-
+            await self._on_tool_start(event, container, rule)
         elif etype == "tool.call_finished":
-            tuid = event.get("tool_use_id", "")
-            if tuid in self._spawn_blocks:
-                # 子 agent 结束:折叠(子 transcript 收起,不与父转述重复)。
-                # 标题的"完成 · N步 · token · 耗时"由子的 run.completed 更新(见下方 else 分支);
-                # 这里只兜底:万一子没正常发 run.completed,别让标题永远停在"运行中"
-                collapsible = self._spawn_blocks[tuid]
-                if collapsible.title.endswith("运行中"):
-                    collapsible.title = "✓ 子 agent 完成"
-                collapsible.collapsed = True
-            else:
-                # 普通工具:按 tool_use_id 找回当初那个块,补写结果
-                found = self._tools.pop(tuid, None)
-                if found is not None:
-                    block, started_at = found
-                    block.set_result(
-                        str(event.get("content", "")),
-                        _elapsed_ms(started_at, event.get("ts")),
-                        is_error=bool(event.get("is_error")),
-                    )
+            self._on_tool_finish(event)
+        elif etype in ("context.compacting", "context.compacted"):
+            self._end_answer()
+            sym, text, metric = event_row(event)
+            await container.mount(EventRow(sym, text, metric, rule_char=rule))
+        elif etype == "run.completed":
+            await self._on_run_completed(event, container, rule)
+        elif etype not in HIDDEN_TYPES:
+            self._end_answer()
+            sym, text, metric = event_row(event)
+            await container.mount(EventRow(sym, text, metric, rule_char=rule))
 
-        elif etype == "context.compacting":
-            # 压缩开始:挂一个"正在压缩"指示器(脉冲条),压完再撤
-            self._end_block()
-            self._compaction_widget = CompactionIndicator()
-            await container.mount(self._compaction_widget)
+        self._view.scroll_end(animate=False)
 
-        elif etype == "context.compacted":
-            # 压缩完成:撤掉指示器,留下一行结果,并让下一次水位更新走下降动画
-            self._end_block()
-            self._remove_compaction_widget()
-            await container.mount(Static(event_markup(event), classes="event"))
-            self._pending_compaction = True
+    async def _on_answer(self, event: dict, container: Widget, rule: str) -> None:
+        self._close_group()
+        if self._answer is None or not self._streaming:
+            self._answer = AnswerBlock(rule_char=rule)
+            await container.mount(self._answer)
+        self._answer.append_token(event.get("content", ""))
+        self._streaming = True
 
+    async def _on_tool_start(self, event: dict, container: Widget, rule: str) -> None:
+        # 后面跟了 tool call → 刚才那段文字是**过程叙述**不是最终回答 → 压暗
+        if self._answer is not None:
+            self._answer.finalize()
+            self._answer.demote()
+            self._answer = None
+        self._streaming = False
+        self.p_thinking.mark_segment()
+
+        name = event.get("tool_name", "")
+        params = event.get("params", {}) or {}
+        tuid = event.get("tool_use_id", "")
+        ts = event.get("ts", "")
+
+        # 任务板从工具参数里就地推导 —— daemon 没有 task.* 的 RPC,事件流里信息已经够了
+        if self.p_tasks.on_tool(name, params):
+            self.p_tasks.refresh_view()
+        if name == "use_skill":
+            self.p_skills.used(str(params.get("name", "")))
+
+        if name == "spawn_agent":
+            self._close_group()
+            block = SubagentBlock(fit(str(params.get("goal", "")), 48))
+            block._started_at = ts
+            self._spawns[tuid] = block
+            await container.mount(block)
+            return
+
+        call = ToolCall(name=name, params=params, started_at=ts)
+        self._last_target = call.target
+        if is_readonly(name):
+            if self._group is None:
+                self._group = ToolGroup(rule_char=rule)
+                self._group_started = time.monotonic()
+                await container.mount(self._group)
+            self._group.add(call)
+            self._calls[tuid] = (call, self._group)
         else:
-            self._end_block()
-            if etype not in HIDDEN_TYPES:
-                await container.mount(Static(event_markup(event), classes="event"))
-            if etype == "run.completed":
-                rid = event.get("run_id")
-                if rid in self._sub_containers:
-                    # 子 agent 完成:把 步数 / token / 耗时 写进它折叠块的标题
-                    collapsible = self._sub_containers[rid]
-                    elapsed = _elapsed_ms(getattr(collapsible, "_spawn_start_ts", ""), event.get("ts"))
-                    collapsible.title = (
-                        f"✓ 子 agent · {event.get('steps', 0)} 步 · "
-                        f"in {event.get('input_tokens', 0)} · out {event.get('output_tokens', 0)} · {elapsed}ms"
-                    )
-                    self._running_subs.pop(collapsible, None)   # 停子 agent 计时
-                elif rid == self._top_run_id:
-                    self._run_start = None                      # 停主 run 计时
-                    self._remove_compaction_widget()   # 兜底:压缩若异常中断,别让指示器卡住
-                    self._set_status("[dim]idle[/dim]")
-                    # 会话累计 token:每个顶层 run 的总量(2b 修复后已含子 agent)累加 → 状态栏
-                    self._sess_in += event.get("input_tokens", 0)
-                    self._sess_out += event.get("output_tokens", 0)
-                    self._sess_cache += event.get("cache_read", 0)
-                    self._render_status()
+            self._close_group()
+            row = ToolRow(call, rule_char=rule)
+            await container.mount(row)
+            self._calls[tuid] = (call, row)
 
-        log.scroll_end(animate=False)
+    def _on_tool_finish(self, event: dict) -> None:
+        tuid = event.get("tool_use_id", "")
+        if tuid in self._spawns:
+            return   # 子 agent 的收尾由它自己的 run.completed 处理
+        found = self._calls.pop(tuid, None)
+        if found is None:
+            return
+        call, holder = found
+        call.output = str(event.get("content", ""))
+        call.elapsed_ms = _elapsed_ms(call.started_at, event.get("ts"))
+        call.is_error = bool(event.get("is_error"))
+        call.finished = True
+        holder._repaint()
 
+    async def _on_run_completed(self, event: dict, container: Widget, rule: str) -> None:
+        self._end_answer()
+        rid = event.get("run_id")
+        if rid in self._sub_runs:
+            block = self._sub_runs[rid]
+            block.finish(event.get("steps", 0),
+                         _elapsed_ms(getattr(block, "_started_at", ""), event.get("ts")))
+            return
+
+        self._close_group()
+        if rid != self._top_run_id:
+            return
+        elapsed = time.monotonic() - self._run_start if self._run_start else 0.0
+        self._run_start = None
+        sym, text, metric = event_row(event)
+        if event.get("status") == "success":
+            text.append(f" · {elapsed:.1f}s", style="dim")   # 事实 + 代价,没有情绪
+            self._set_state("idle")
+        else:
+            self._set_state("failed")
+        await container.mount(EventRow(sym, text, metric, rule_char=rule))
+        # 【死锁警告】绝对不能在这里 await send_command:_on_event 是被读循环的 _dispatch
+        # 直接 await 的,而 send_command 要等的响应只能由那条读循环送达 —— 在读循环里
+        # 等读循环 = 永久挂起,之后所有事件(thinking / content / 权限 ask)全部进不来。
+        # 一律丢到独立 worker 里发。
+        self.run_worker(self._load_sessions())
+
+    # ---- 权限 ----
 
     async def _prompt_permission(self, ask: dict) -> str:
-        # 内联:往对话区挂一个 PermissionPrompt(不覆盖整屏),await Future 等它被选中。
-        # 选中后 prompt 自己 set_result + remove;这里拿到 decision,顺手把焦点还给输入框。
         future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-        view = self.query_one("#log", VerticalScroll)
-        await view.mount(PermissionPrompt(ask, future))
-        view.scroll_end(animate=False)
+        prompt = PermissionPrompt(ask, future, skip_detail=self._last_target)
+        self._pending_perm = prompt
+        await self._view.mount(prompt)
+        self._view.scroll_end(animate=False)     # 自动滚到它 —— 长会话里别让人找
+        self._set_state("ask")
+        goal = self.query_one("#goal", Input)
+        goal.disabled = True
         try:
             return await future
         finally:
-            self.query_one("#goal", Input).focus()
+            self._pending_perm = None
+            goal.disabled = False
+            goal.focus()
+            self._set_state("running" if self._run_start is not None else "idle")
+
     # ---- 输入 ----
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
+
+        if self.p_sessions.picking and not text:
+            self._confirm_session()          # 选会话时空回车 = 确认
+            return
         if not text:
             return
         event.input.value = ""
 
-        view = self.query_one("#log", VerticalScroll)
-
-        if self._client is None:
-            await view.mount(Static("尚未连接到 core，请检查 core 是否已启动。", classes="sys"))
+        if not self._connected:
+            await self._view.mount(
+                EventRow(SYM["error"], Text("core 已断开。重连: aemeath core", style=S_ERROR))
+            )
+            self._view.scroll_end(animate=False)
             return
 
-        # 斜杠命令:分流,不当 goal 发出去
         if text.startswith("/"):
-            await self._handle_command(text, view)
+            await self._handle_command(text)
             return
 
-        await view.mount(Static(f"❯ {text}", classes="user"))
-        view.scroll_end(animate=False)
-
+        await self._echo_user(text)
         if self._session_id is None:
-            await view.mount(Static("会话尚未就绪，请稍候…", classes="sys"))
+            await self._view.mount(EventRow("", Text("session 尚未就绪", style="dim")))
             return
 
-        self._end_block()
-        self._set_status("[$accent]running…[/$accent]")
-        ack = await self._client.send_command("run", {"goal": text, "session_id": self._session_id})
+        self._end_answer()
+        self.p_thinking.clear()
+        self.p_tasks.clear()      # 任务板是"这一轮在干什么",不该留着上一轮的
+        self._set_state("running")
+        self._run_start = time.monotonic()
+        ack = await self._client.send_command(
+            "run", {"goal": text, "session_id": self._session_id}
+        )
         self._top_run_id = ack.get("run_id")
-        self._run_start = time.monotonic()   # 开始主 run 计时
-        view.scroll_end(animate=False)
+        self._view.scroll_end(animate=False)
 
-    # ---- 斜杠命令(跟 CLI chat 同一套:检测 → 调对应 session.* 命令)----
+    async def _echo_user(self, text: str) -> None:
+        # 空态是垂直居中的,一有内容就该退场,否则中间那块留白会一直顶着
+        if self._splash is not None:
+            self._splash.remove()
+            self._splash = None
+        await self._view.mount(Static(LedgerRow("", ""), classes="gap"))
+        await self._view.mount(Static(
+            LedgerFrame(Text(text), gutter="›", gutter_style=S_MOTION), classes="user"
+        ))
+        self._view.scroll_end(animate=False)
 
-    async def _handle_command(self, text: str, view: VerticalScroll) -> None:
-        if text == "/sessions":
-            resp = await self._client.send_command("session.list", {})
-            await self._show_sessions(resp["sessions"], view)
+    # ---- 斜杠命令 ----
+
+    async def _handle_command(self, text: str) -> None:
+        view = self._view
+        if text == "/resume":
+            await self._load_sessions()
+            self._enter_picking()
         elif text == "/usage":
-            resp = await self._client.send_command("session.usage", {"session_id": self._session_id})
-            if isinstance(resp, str):
-                await view.mount(Static(resp, classes="sys"))
-            else:
-                await view.mount(Static(
-                    f"📊 本会话累计 token:输入 {resp['input_tokens']} · "
-                    f"输出 {resp['output_tokens']} · 缓存读 {resp['cache_read']}",
-                    classes="sys"))
+            resp = await self._client.send_command(
+                "session.usage", {"session_id": self._session_id}
+            )
+            body = (resp if isinstance(resp, str)
+                    else f"in {resp['input_tokens']} · out {resp['output_tokens']} "
+                         f"· cache {resp['cache_read']}")
+            await view.mount(EventRow("", Text(body, style="dim")))
         elif text == "/mcp":
             resp = await self._client.send_command("mcp.list", {})
-            await self._show_mcp(resp["servers"], view)
+            await self._show_mcp(resp["servers"])
+        elif text == "/help":
+            await view.mount(EventRow("", Text("  ".join(COMMANDS), style="dim")))
         elif text == "/clear":
             created = await self._client.send_command("session.create", {"mode": "multi_turn"})
             self._session_id = created["session_id"]
             await view.remove_children()
-            self._show_ctx(0)   # 新会话上下文清零 → 0%
-            self._sess_in = self._sess_out = self._sess_cache = 0   # 会话累计 token 归零
-            self._spawn_blocks.clear(); self._sub_containers.clear()   # 折叠块映射清干净,别留悬空引用
-            self._run_start = None; self._running_subs.clear()   # 计时器归零
-            self._render_status()
-            await view.mount(Static(f"🧹 已开新会话 (session={self._session_id[:8]})", classes="sys"))
-        elif text.startswith("/resume"):
-            parts = text.split(maxsplit=1)
-            if len(parts) >= 2:                       # /resume <id>:直接恢复
-                await self._do_resume(parts[1].strip(), view)
-            else:                                     # /resume:弹选择器(在 worker 里跑)
-                self._pick_and_resume(view)
+            self._reset_run_state()
+            self._ctx_used = 0
+            self.p_tasks.clear()
+            self.p_thinking.clear()
+            self._refresh_status()
+            self._mount_splash()          # 清空之后 logo 回来 —— 房间不该是空的
+            await self._load_sessions()
         else:
-            await view.mount(Static(f"未知命令:{text}  (可用 /sessions /resume /clear)", classes="sys"))
+            await view.mount(EventRow("", Text(f"未知命令 {text}", style="dim")))
+            await view.mount(EventRow("", Text("  ".join(COMMANDS), style="dim")))
         view.scroll_end(animate=False)
 
-    @work
-    async def _pick_and_resume(self, view: VerticalScroll) -> None:
-        # push_screen_wait 会挂起等弹层关闭,必须在 worker 里跑,否则堵住消息泵
-        resp = await self._client.send_command("session.list", {})
-        sessions = resp["sessions"]
-        if not sessions:
-            await view.mount(Static("(还没有历史会话)", classes="sys"))
-            return
-        target = await self.push_screen_wait(SessionPicker(sessions))
-        if target:                                    # None = Esc 取消
-            await self._do_resume(target, view)
+    def _reset_run_state(self) -> None:
+        self._spawns.clear()
+        self._sub_runs.clear()
+        self._calls.clear()
+        self._group = None
+        self._answer = None
+        self._streaming = False
+        self._run_start = None
+        self._splash = None
 
-    async def _do_resume(self, target: str, view: VerticalScroll) -> None:
+    async def _show_mcp(self, servers: list) -> None:
+        view = self._view
+        if not servers:
+            await view.mount(EventRow("", Text("没有已连接的 MCP server", style="dim")))
+            return
+        for s in servers:
+            line = Text()
+            line.append((s.get("name") or "").ljust(16))
+            if s.get("connected"):
+                # 默认只列 server,工具名要展开才看
+                line.append(f"{len(s.get('tools', []))} 个工具", style="dim")
+                await view.mount(EventRow(SYM["done"], line))
+            else:
+                line.append(str(s.get("error") or "连接失败"), style=S_ERROR)
+                await view.mount(EventRow(SYM["error"], line, gutter_style=S_ERROR))
+
+    # ---- 会话选择(^p / ^n / Enter / Esc)----
+
+    def _enter_picking(self) -> None:
+        self.p_sessions.picking = True
+        self.p_sessions.add_class("-active")
+        # 提示写进面板标题,不往 content 里塞 —— 那属于导航状态,不属于对话内容
+        self.p_sessions.border_title = "Sessions  ^↑/^↓ · Enter 恢复 · Esc 取消"
+        self.p_sessions.refresh_view()
+
+    def _exit_picking(self) -> None:
+        self.p_sessions.picking = False
+        self.p_sessions.remove_class("-active")
+        self.p_sessions.border_title = "Sessions"
+        self.p_sessions.refresh_view()
+
+    def action_session_prev(self) -> None:
+        self._enter_picking()
+        self.p_sessions.move(-1)
+
+    def action_session_next(self) -> None:
+        self._enter_picking()
+        self.p_sessions.move(1)
+
+    def action_scroll_up(self) -> None:
+        self._view.scroll_page_up(animate=False)
+
+    def action_scroll_down(self) -> None:
+        self._view.scroll_page_down(animate=False)
+
+    def action_think_up(self) -> None:
+        self.p_thinking.scroll_page_up(animate=False)
+
+    def action_think_down(self) -> None:
+        self.p_thinking.scroll_page_down(animate=False)
+
+    async def on_key(self, event) -> None:
+        # 审批的按键在 App 层收 —— 容器 widget 默认 can_focus=False,靠它自己 focus() 是空操作,
+        # 输入框又被禁用了,于是 1/2/3 谁都收不到 → Future 永远不 resolve → 整个界面卡死。
+        if self._pending_perm is not None:
+            choice = {"1": "allow_once", "2": "allow_always",
+                      "3": "deny", "escape": "deny"}.get(event.key)
+            if choice:
+                self._pending_perm.decide(choice)
+                event.stop()
+            return
+        if event.key == "escape" and self.p_sessions.picking:
+            self._exit_picking()
+            event.stop()
+
+    @work
+    async def _confirm_session(self) -> None:
+        row = self.p_sessions.current
+        self._exit_picking()
+        if row is not None:
+            await self._do_resume(row.id)
+
+    async def _do_resume(self, target: str) -> None:
         resp = await self._client.send_command("session.resume", {"session_id": target})
-        if isinstance(resp, str):      # handler 用字符串报错(如"会话不存在")
-            await view.mount(Static(resp, classes="sys"))
+        if isinstance(resp, str):
+            await self._view.mount(EventRow("", Text(resp, style="dim")))
             return
         self._session_id = resp["session_id"]
-        await view.remove_children()
-        self._spawn_blocks.clear(); self._sub_containers.clear()
-        # 恢复会话:拉一次累计 usage 填状态栏(历史 run 的 token 总量)
-        usage = await self._client.send_command("session.usage", {"session_id": self._session_id})
-        if not isinstance(usage, str):
-            self._sess_in = usage.get("input_tokens", 0)
-            self._sess_out = usage.get("output_tokens", 0)
-            self._sess_cache = usage.get("cache_read", 0)
-            self._render_status()
-        # resume 还没发问 → 没有实时 usage,先用历史本地估一把水位(问第一句后被真实值刷新)
-        used = sum(_estimate_msg_tokens(m) for m in resp["history"])
-        self._show_ctx(used)
+        await self._view.remove_children()
+        self._reset_run_state()
+        self.p_tasks.clear()
+        self.p_skills.clear()
+        self.p_thinking.clear()
+        self._ctx_used = sum(_estimate_msg_tokens(m) for m in resp["history"])
+        self._refresh_status()
         title = resp.get("title") or ""
-        await view.mount(Static(f"⏪ 已恢复会话 (session={self._session_id[:8]}  {title})", classes="sys"))
-        await self._replay_history(resp["history"], view)
+        await self._view.mount(EventRow("", Text(f"已恢复 · {title}".rstrip(" ·"), style="dim")))
+        await self._replay_history(resp["history"])
 
-    async def _show_sessions(self, sessions: list, view: VerticalScroll) -> None:
-        if not sessions:
-            await view.mount(Static("(还没有历史会话)", classes="sys"))
-            return
-        lines = ["历史会话(最近在前):"]
-        for s in sessions:
-            updated = (s.get("updated_at") or "")[:19]
-            title = s.get("title") or "(无标题)"
-            lines.append(f"  {s.get('id')}  {updated}  {title}")   # 完整 id,方便复制去 /resume
-        await view.mount(Static("\n".join(lines), classes="sys"))
-
-    async def _show_mcp(self, servers: list, view: VerticalScroll) -> None:
-        if not servers:
-            await view.mount(Static("(没有已连接的 MCP server)", classes="sys"))
-            return
-        lines = ["MCP server:"]
-        for s in servers:
-            mark = "✓" if s.get("connected") else "✗"
-            n = len(s.get("tools", []))
-            lines.append(f"  {mark} {s.get('name')}  ({n} 个工具)")
-            for t in s.get("tools", []):
-                lines.append(f"      · {t}")
-            if not s.get("connected") and s.get("error"):
-                lines.append(f"      连接失败:{s['error']}")
-        await view.mount(Static("\n".join(lines), classes="sys"))
-
-    async def _replay_history(self, history: list, view: VerticalScroll) -> None:
+    async def _replay_history(self, history: list) -> None:
         for msg in history:
             content = _extract_text(msg.get("content"))
             if not content.strip():
-                continue   # 跳过纯 tool 块的消息
+                continue
             if msg.get("role") == "user":
-                await view.mount(Static(f"❯ {content}", classes="user"))
+                await self._echo_user(content)
             else:
-                # 用跟 live 回答同款的块渲染 markdown,观感一致(粗体/列表/分隔线才好看)
-                block = LLMStreamBlock(markdown=True, classes="answer")
-                await view.mount(block)
+                block = AnswerBlock()
+                await self._view.mount(block)
                 block.append_token(content)
                 block.finalize()
 
 
 def _estimate_msg_tokens(msg: dict) -> int:
-    """resume 时本地粗估一条消息的 token(chars/4),和 compactor 同款启发式。
-    只用于展示近似水位,真实值由第一轮 chat 的 usage 事件刷新。"""
+    """resume 时本地粗估一条消息的 token(chars/4),和 compactor 同款启发式。"""
     content = msg.get("content")
     text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
     return len(text) // 4
 
 
 def _extract_text(content) -> str:
-    """从一条 message 的 content 抽可读文本:str 直接用;list 取 text 块。"""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
