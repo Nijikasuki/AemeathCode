@@ -1,0 +1,15 @@
+flowchart LR
+    IN(["run request"]) --> RUNNER["Runner<br/>create a background job"]
+    RUNNER --> LOOP["AgentLoop<br/>ReAct loop"]
+    LOOP -->|"messages"| PROV["LLMProvider<br/>Anthropic-compatible endpoint"]
+    PROV -->|"tool_use"| LOOP
+    LOOP -->|"execute"| TOOLS["ToolRegistry<br/>8 built-in families + MCP tools"]
+    TOOLS -->|"tool_result"| LOOP
+    LOOP -.->|"passes through every step"| SVC["permissions · compaction<br/>session memory · trace · EventBus"]
+
+    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
+    classDef hot fill:none,stroke:#d98cb3,stroke-width:2px
+    classDef side fill:none,stroke:#8b93a7,stroke-width:1px,stroke-dasharray:4 4
+    class IN,RUNNER,PROV,TOOLS box
+    class LOOP hot
+    class SVC side

@@ -17,9 +17,9 @@
 
 </div>
 
-<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/screenshot.png" width="100%" alt="AemeathCode TUI 正在执行一个 run">
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/splash.png" width="100%" alt="AemeathCode TUI 启动后的界面">
 
-<sub>一个 run 正在跑:左边是它的思考,中间是工具调用和流式回答,右边是它给自己列的任务和这一轮改过的文件。</sub>
+<sub>左栏 Status / Sessions / Thinking · 中间 Content 和输入行 · 右栏 Tasks / Changes / MCP / Skills。</sub>
 
 ---
 
@@ -84,9 +84,7 @@ uv tool install aemeathcode
 aemeath
 ```
 
-就这一条。第一次跑会弹配置向导问你三件事(API Key、Base URL、模型名),填完就进界面:
-
-<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/splash.png" width="100%" alt="AemeathCode TUI 启动后的空态界面">
+就这一条。第一次跑会弹配置向导问你三件事(API Key、Base URL、模型名),填完就进界面。
 
 底层是「后台 daemon + 前端」双进程,但你不用管它 —— `aemeath` 会自己探活,没有就在后台拉起 daemon 再进界面(像 `docker` 那样)。daemon 常驻,下次秒进;用完 `aemeath stop` 关掉。
 
@@ -97,6 +95,10 @@ aemeath
 ## 它怎么工作
 
 ### ReAct 循环
+
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/screenshot.png" width="100%" alt="AemeathCode 正在执行一个 run">
+
+<sub>一个 run 正在跑:中间是工具调用和逐字输出的回答,左边是它的思考,右边是它给自己列的任务。</sub>
 
 一个 run 就是一段循环:把对话发给模型 → 模型要么直接回答、要么说「我要调这几个工具」→ 执行工具 → 把结果塞回对话 → 再发给模型 → 直到它不再要工具。
 
@@ -168,17 +170,9 @@ aemeath
 
 ### 两个进程,一条连接
 
-界面和大脑是两个独立进程,中间只有一条 TCP 连接 —— 不是一个端口一件事,而是一条线上跑三种完全不同的流量。分帧用 NDJSON,信封是 JSON-RPC 2.0。
+界面和大脑是两个独立进程。中间只有一条 TCP 连接 —— 不是一个端口一件事,而是一条线上跑三种完全不同的流量。
 
-```mermaid
-flowchart LR
-    FE["前端进程 · TUI / CLI"]
-    LINK["一条 TCP 连接"]
-    BE["daemon · aemeath core"]
-
-    FE <--> LINK
-    LINK <--> BE
-```
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/diagrams/arch-link.zh.svg" width="100%" alt="两个进程,一条 TCP 连接:前端 ↔ 连接 ↔ daemon ↔ 外部 MCP server">
 
 那条线上的三种流量:
 
@@ -192,18 +186,9 @@ flowchart LR
 
 ### 一个 run 在 daemon 里走过哪里
 
-```mermaid
-flowchart LR
-    IN(["run 请求"]) --> RUNNER["Runner"]
-    RUNNER --> LOOP["AgentLoop · ReAct 循环"]
-    LOOP <-->|"messages"| PROV["LLMProvider"]
-    LOOP -->|"tool_use"| PERM["权限审批"]
-    PERM -->|"批准"| TOOLS["ToolRegistry"]
-    TOOLS -->|"tool_result"| LOOP
-    TOOLS <-->|"stdio JSON-RPC"| MCP["外部 MCP server"]
-```
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/diagrams/arch-run.zh.svg" width="100%" alt="一个 run 在 daemon 里的路径:Runner → AgentLoop,循环调用 LLMProvider 与 ToolRegistry">
 
-`tool_use → 权限审批 → ToolRegistry → tool_result` 绕回 loop,这一圈就是循环本身;跳出条件只有一个 —— 模型这一轮没再要工具。权限审批夹在 loop 和工具中间,所以被拒绝的调用根本没走到工具那一步,但它仍然要带着一句错误说明回到 loop —— 否则 `tool_use` 就配不上对了。
+两条回边就是循环本身:`tool_use` 从模型回到 loop、`tool_result` 从工具回到 loop。跳出条件只有一个 —— 模型这一轮没再要工具。
 
 源码在 `src/aemeathcode/`:
 

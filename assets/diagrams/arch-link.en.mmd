@@ -1,0 +1,14 @@
+flowchart LR
+    FE["Frontend process<br/>TUI · Textual<br/>CLI · run / chat / watch"]
+    LINK["One TCP connection<br/>NDJSON framing<br/>JSON-RPC 2.0, multiplexed"]
+    BE["daemon process · aemeath core<br/>Runner · AgentLoop · tools<br/>permissions · compaction · sessions · trace"]
+    MCPS["External MCP server<br/>GitHub · filesystem · …"]
+
+    FE <--> LINK
+    LINK <--> BE
+    BE <-->|"stdio JSON-RPC"| MCPS
+
+    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
+    classDef wire fill:none,stroke:#d98cb3,stroke-width:2px
+    class FE,BE,MCPS box
+    class LINK wire

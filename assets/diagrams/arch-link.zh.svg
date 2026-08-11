@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1190 123" width="1190" height="123" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', 'PingFang SC', 'Microsoft YaHei', Helvetica, Arial, sans-serif" role="img">
+<style>
+  .surface { fill: #f6f8fa; stroke: #8b93a7; stroke-width: 1.4; }
+  .surface.accent { stroke: #d98cb3; stroke-width: 2; }
+  .surface.soft   { stroke-dasharray: 5 4; }
+  .t     { fill: #1f2328; font-size: 14px; }
+  .t.dim { fill: #57606a; font-size: 12px; }
+  .edge  { stroke: #8b93a7; stroke-width: 1.4; fill: none; }
+  .edge.dashed { stroke-dasharray: 5 4; }
+  .chip  { fill: #f6f8fa; }
+  .head  { fill: #8b93a7; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #161b22; stroke: #7d8590; }
+    .surface.accent { stroke: #d98cb3; }
+    .t     { fill: #e6edf3; }
+    .t.dim { fill: #9198a1; }
+    .edge  { stroke: #7d8590; }
+    .chip  { fill: #161b22; }
+    .head  { fill: #7d8590; }
+  }
+</style>
+<defs>
+<marker id="a" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,4 L0,8 z" class="head"/></marker>
+</defs>
+<path d="M220,62 H312" class="edge" marker-end="url(#a)" marker-start="url(#a)"/>
+<path d="M511,62 H603" class="edge" marker-end="url(#a)" marker-start="url(#a)"/>
+<path d="M841,62 H990" class="edge" marker-end="url(#a)" marker-start="url(#a)"/>
+<rect class="chip" x="858" y="52" width="115" height="20" rx="4"/>
+<text class="t dim" x="916" y="62" text-anchor="middle" dominant-baseline="central">stdio JSON-RPC</text>
+<rect class="surface" x="14" y="14" width="206" height="95" rx="7"/>
+<text class="t" x="117" y="40" text-anchor="middle" dominant-baseline="central">前端进程</text>
+<text class="t" x="117" y="62" text-anchor="middle" dominant-baseline="central">TUI · Textual</text>
+<text class="t" x="117" y="82" text-anchor="middle" dominant-baseline="central">CLI · run / chat / watch</text>
+<rect class="surface accent" x="312" y="14" width="199" height="95" rx="7"/>
+<text class="t" x="411" y="40" text-anchor="middle" dominant-baseline="central">一条 TCP 连接</text>
+<text class="t" x="411" y="62" text-anchor="middle" dominant-baseline="central">NDJSON 分帧</text>
+<text class="t" x="411" y="82" text-anchor="middle" dominant-baseline="central">JSON-RPC 2.0 多路复用</text>
+<rect class="surface" x="603" y="14" width="239" height="95" rx="7"/>
+<text class="t" x="722" y="40" text-anchor="middle" dominant-baseline="central">daemon 进程 · aemeath core</text>
+<text class="t" x="722" y="62" text-anchor="middle" dominant-baseline="central">Runner · AgentLoop · 工具层</text>
+<text class="t" x="722" y="82" text-anchor="middle" dominant-baseline="central">权限 · 压缩 · 会话 · Trace</text>
+<rect class="surface" x="990" y="24" width="186" height="74" rx="7"/>
+<text class="t" x="1083" y="51" text-anchor="middle" dominant-baseline="central">外部 MCP server</text>
+<text class="t" x="1083" y="72" text-anchor="middle" dominant-baseline="central">GitHub · 文件系统 · …</text>
+</svg>

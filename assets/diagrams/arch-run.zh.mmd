@@ -1,0 +1,15 @@
+flowchart LR
+    IN(["run 请求"]) --> RUNNER["Runner<br/>建一个后台作业"]
+    RUNNER --> LOOP["AgentLoop<br/>ReAct 循环"]
+    LOOP -->|"messages"| PROV["LLMProvider<br/>Anthropic 兼容端点"]
+    PROV -->|"tool_use"| LOOP
+    LOOP -->|"执行"| TOOLS["ToolRegistry<br/>8 类内置工具 + MCP 工具"]
+    TOOLS -->|"tool_result"| LOOP
+    LOOP -.->|"每一步都经过"| SVC["权限审批 · 上下文压缩<br/>会话记忆 · Trace · EventBus"]
+
+    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
+    classDef hot fill:none,stroke:#d98cb3,stroke-width:2px
+    classDef side fill:none,stroke:#8b93a7,stroke-width:1px,stroke-dasharray:4 4
+    class IN,RUNNER,PROV,TOOLS box
+    class LOOP hot
+    class SVC side

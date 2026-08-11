@@ -17,9 +17,9 @@
 
 </div>
 
-<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/screenshot.png" width="100%" alt="The AemeathCode TUI executing a run">
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/splash.png" width="100%" alt="The AemeathCode TUI right after launch">
 
-<sub>A run in progress: its thinking on the left, tool calls and the streaming answer in the middle, the task list it wrote for itself and the files it touched this round on the right.</sub>
+<sub>Left: Status / Sessions / Thinking · Middle: Content and the prompt · Right: Tasks / Changes / MCP / Skills.</sub>
 
 ---
 
@@ -84,9 +84,7 @@ uv tool install aemeathcode
 aemeath
 ```
 
-That's the whole thing. The first run opens a setup wizard asking for three values (API key, base URL, model name), then drops you into the UI:
-
-<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/splash.png" width="100%" alt="The AemeathCode TUI right after launch">
+That's the whole thing. The first run opens a setup wizard asking for three values (API key, base URL, model name), then drops you into the UI.
 
 Underneath it's a two-process "background daemon + frontend" architecture, but you never manage it —— `aemeath` probes for the daemon, spawns it in the background if absent, then opens the UI (much like `docker`). The daemon stays resident so the next launch is instant; `aemeath stop` shuts it down.
 
@@ -97,6 +95,10 @@ Works with any Anthropic Messages API–compatible endpoint: official, DeepSeek,
 ## How it works
 
 ### The ReAct loop
+
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/screenshot.png" width="100%" alt="AemeathCode executing a run">
+
+<sub>A run in progress: tool calls and the streaming answer in the middle, its thinking on the left, the tasks it wrote for itself on the right.</sub>
 
 A run is a loop: send the conversation to the model → it either answers or says "call these tools" → execute them → feed the results back → send again → until it stops asking for tools.
 
@@ -168,17 +170,9 @@ The matching git tags are `stage-0` … `stage-7` — check them out in order to
 
 ### Two processes, one connection
 
-The interface and the brain are separate processes, joined by exactly one TCP connection — not a port per concern, but three very different kinds of traffic sharing a single wire. Framing is NDJSON; the envelope is JSON-RPC 2.0.
+The interface and the brain are separate processes, joined by exactly one TCP connection — not a port per concern, but three very different kinds of traffic sharing a single wire.
 
-```mermaid
-flowchart LR
-    FE["Frontend · TUI / CLI"]
-    LINK["One TCP connection"]
-    BE["daemon · aemeath core"]
-
-    FE <--> LINK
-    LINK <--> BE
-```
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/diagrams/arch-link.en.svg" width="100%" alt="Two processes, one TCP connection: frontend ↔ link ↔ daemon ↔ external MCP server">
 
 The three kinds of traffic on that wire:
 
@@ -192,18 +186,9 @@ The third one is the least intuitive part of the design: the direction flips, th
 
 ### Where a run goes inside the daemon
 
-```mermaid
-flowchart LR
-    IN(["run request"]) --> RUNNER["Runner"]
-    RUNNER --> LOOP["AgentLoop · ReAct loop"]
-    LOOP <-->|"messages"| PROV["LLMProvider"]
-    LOOP -->|"tool_use"| PERM["Permission check"]
-    PERM -->|"approved"| TOOLS["ToolRegistry"]
-    TOOLS -->|"tool_result"| LOOP
-    TOOLS <-->|"stdio JSON-RPC"| MCP["External MCP server"]
-```
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/diagrams/arch-run.en.svg" width="100%" alt="A run inside the daemon: Runner → AgentLoop, looping through LLMProvider and ToolRegistry">
 
-`tool_use → permission check → ToolRegistry → tool_result` circling back to the loop *is* the loop; there is exactly one exit condition — the model stopped asking for tools. The permission gate sits between the loop and the tools, so a denied call never reaches the tool at all — yet it still has to come back carrying an error message, or the `tool_use` would be left unpaired.
+The two back-edges *are* the loop: `tool_use` returning from the model, `tool_result` returning from the tools. There is exactly one exit condition — the model stopped asking for tools.
 
 Source lives in `src/aemeathcode/`:
 

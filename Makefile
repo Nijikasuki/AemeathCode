@@ -1,4 +1,4 @@
-.PHONY: help install test run stop build clean
+.PHONY: help install test run stop build clean diagrams
 
 help:  ## 显示可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -15,6 +15,9 @@ run:  ## 启动(自动拉起 daemon + 进 TUI)
 
 stop:  ## 关闭后台 daemon
 	uv run aemeath stop
+
+diagrams:  ## 把 assets/diagrams/*.mmd 重新渲染成 SVG(README 里引用的是 SVG)
+	uv run python assets/diagrams/render.py
 
 build:  ## 构建 wheel + sdist
 	uv build

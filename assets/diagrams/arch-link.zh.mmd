@@ -1,0 +1,14 @@
+flowchart LR
+    FE["前端进程<br/>TUI · Textual<br/>CLI · run / chat / watch"]
+    LINK["一条 TCP 连接<br/>NDJSON 分帧<br/>JSON-RPC 2.0 多路复用"]
+    BE["daemon 进程 · aemeath core<br/>Runner · AgentLoop · 工具层<br/>权限 · 压缩 · 会话 · Trace"]
+    MCPS["外部 MCP server<br/>GitHub · 文件系统 · …"]
+
+    FE <--> LINK
+    LINK <--> BE
+    BE <-->|"stdio JSON-RPC"| MCPS
+
+    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
+    classDef wire fill:none,stroke:#d98cb3,stroke-width:2px
+    class FE,BE,MCPS box
+    class LINK wire

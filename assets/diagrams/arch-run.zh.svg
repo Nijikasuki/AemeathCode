@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1257 318" width="1257" height="318" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', 'PingFang SC', 'Microsoft YaHei', Helvetica, Arial, sans-serif" role="img">
+<style>
+  .surface { fill: #f6f8fa; stroke: #8b93a7; stroke-width: 1.4; }
+  .surface.accent { stroke: #d98cb3; stroke-width: 2; }
+  .surface.soft   { stroke-dasharray: 5 4; }
+  .t     { fill: #1f2328; font-size: 14px; }
+  .t.dim { fill: #57606a; font-size: 12px; }
+  .edge  { stroke: #8b93a7; stroke-width: 1.4; fill: none; }
+  .edge.dashed { stroke-dasharray: 5 4; }
+  .chip  { fill: #f6f8fa; }
+  .head  { fill: #8b93a7; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #161b22; stroke: #7d8590; }
+    .surface.accent { stroke: #d98cb3; }
+    .t     { fill: #e6edf3; }
+    .t.dim { fill: #9198a1; }
+    .edge  { stroke: #7d8590; }
+    .chip  { fill: #161b22; }
+    .head  { fill: #7d8590; }
+  }
+</style>
+<defs>
+<marker id="a" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,4 L0,8 z" class="head"/></marker>
+</defs>
+<path d="M111,159 H203" class="edge" marker-end="url(#a)"/>
+<path d="M343,159 H435" class="edge" marker-end="url(#a)"/>
+<path d="M551,136 H632 V40 H1037" class="edge" marker-end="url(#a)"/>
+<rect class="chip" x="597" y="78" width="70" height="20" rx="4"/>
+<text class="t dim" x="632" y="88" text-anchor="middle" dominant-baseline="central">messages</text>
+<path d="M1037,62 H713 V148 H551" class="edge" marker-end="url(#a)"/>
+<rect class="chip" x="678" y="95" width="70" height="20" rx="4"/>
+<text class="t dim" x="713" y="105" text-anchor="middle" dominant-baseline="central">tool_use</text>
+<path d="M551,154 H1025" class="edge" marker-end="url(#a)"/>
+<rect class="chip" x="768" y="144" width="38" height="20" rx="4"/>
+<text class="t dim" x="788" y="154" text-anchor="middle" dominant-baseline="central">执行</text>
+<path d="M1025,170 H551" class="edge" marker-end="url(#a)"/>
+<rect class="chip" x="821" y="160" width="91" height="20" rx="4"/>
+<text class="t dim" x="867" y="170" text-anchor="middle" dominant-baseline="central">tool_result</text>
+<path d="M551,182 H931 V267 H1007" class="edge dashed" marker-end="url(#a)"/>
+<rect class="chip" x="887" y="214" width="87" height="20" rx="4"/>
+<text class="t dim" x="931" y="224" text-anchor="middle" dominant-baseline="central">每一步都经过</text>
+<rect class="surface" x="14" y="132" width="97" height="53" rx="26"/>
+<text class="t" x="63" y="159" text-anchor="middle" dominant-baseline="central">run 请求</text>
+<rect class="surface" x="203" y="122" width="140" height="74" rx="7"/>
+<text class="t" x="273" y="148" text-anchor="middle" dominant-baseline="central">Runner</text>
+<text class="t" x="273" y="170" text-anchor="middle" dominant-baseline="central">建一个后台作业</text>
+<rect class="surface accent" x="435" y="122" width="116" height="74" rx="7"/>
+<text class="t" x="493" y="148" text-anchor="middle" dominant-baseline="central">AgentLoop</text>
+<text class="t" x="493" y="170" text-anchor="middle" dominant-baseline="central">ReAct 循环</text>
+<rect class="surface" x="1037" y="14" width="176" height="74" rx="7"/>
+<text class="t" x="1125" y="40" text-anchor="middle" dominant-baseline="central">LLMProvider</text>
+<text class="t" x="1125" y="62" text-anchor="middle" dominant-baseline="central">Anthropic 兼容端点</text>
+<rect class="surface" x="1025" y="122" width="201" height="74" rx="7"/>
+<text class="t" x="1125" y="148" text-anchor="middle" dominant-baseline="central">ToolRegistry</text>
+<text class="t" x="1125" y="170" text-anchor="middle" dominant-baseline="central">8 类内置工具 + MCP 工具</text>
+<rect class="surface soft" x="1007" y="230" width="237" height="74" rx="7"/>
+<text class="t" x="1125" y="256" text-anchor="middle" dominant-baseline="central">权限审批 · 上下文压缩</text>
+<text class="t" x="1125" y="278" text-anchor="middle" dominant-baseline="central">会话记忆 · Trace · EventBus</text>
+</svg>

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1531 318" width="1531" height="318" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', 'PingFang SC', 'Microsoft YaHei', Helvetica, Arial, sans-serif" role="img">
+<style>
+  .surface { fill: #f6f8fa; stroke: #8b93a7; stroke-width: 1.4; }
+  .surface.accent { stroke: #d98cb3; stroke-width: 2; }
+  .surface.soft   { stroke-dasharray: 5 4; }
+  .t     { fill: #1f2328; font-size: 14px; }
+  .t.dim { fill: #57606a; font-size: 12px; }
+  .edge  { stroke: #8b93a7; stroke-width: 1.4; fill: none; }
+  .edge.dashed { stroke-dasharray: 5 4; }
+  .chip  { fill: #f6f8fa; }
+  .head  { fill: #8b93a7; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #161b22; stroke: #7d8590; }
+    .surface.accent { stroke: #d98cb3; }
+    .t     { fill: #e6edf3; }
+    .t.dim { fill: #9198a1; }
+    .edge  { stroke: #7d8590; }
+    .chip  { fill: #161b22; }
+    .head  { fill: #7d8590; }
+  }
+</style>
+<defs>
+<marker id="a" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,4 L0,8 z" class="head"/></marker>
+</defs>
+<path d="M139,159 H231" class="edge" marker-end="url(#a)"/>
+<path d="M446,159 H538" class="edge" marker-end="url(#a)"/>
+<path d="M658,136 H754 V40 H1236" class="edge" marker-end="url(#a)"/>
+<rect class="chip" x="719" y="78" width="70" height="20" rx="4"/>
+<text class="t dim" x="754" y="88" text-anchor="middle" dominant-baseline="central">messages</text>
+<path d="M1236,62 H851 V148 H658" class="edge" marker-end="url(#a)"/>
+<rect class="chip" x="816" y="95" width="70" height="20" rx="4"/>
+<text class="t dim" x="851" y="105" text-anchor="middle" dominant-baseline="central">tool_use</text>
+<path d="M658,154 H1235" class="edge" marker-end="url(#a)"/>
+<rect class="chip" x="915" y="144" width="63" height="20" rx="4"/>
+<text class="t dim" x="946" y="154" text-anchor="middle" dominant-baseline="central">execute</text>
+<path d="M1235,170 H658" class="edge" marker-end="url(#a)"/>
+<rect class="chip" x="997" y="160" width="91" height="20" rx="4"/>
+<text class="t dim" x="1043" y="170" text-anchor="middle" dominant-baseline="central">tool_result</text>
+<path d="M658,182 H1133 V267 H1228" class="edge dashed" marker-end="url(#a)"/>
+<rect class="chip" x="1044" y="214" width="178" height="20" rx="4"/>
+<text class="t dim" x="1133" y="224" text-anchor="middle" dominant-baseline="central">passes through every step</text>
+<rect class="surface" x="14" y="132" width="125" height="53" rx="26"/>
+<text class="t" x="77" y="159" text-anchor="middle" dominant-baseline="central">run request</text>
+<rect class="surface" x="231" y="122" width="215" height="74" rx="7"/>
+<text class="t" x="339" y="148" text-anchor="middle" dominant-baseline="central">Runner</text>
+<text class="t" x="339" y="170" text-anchor="middle" dominant-baseline="central">create a background job</text>
+<rect class="surface accent" x="538" y="122" width="120" height="74" rx="7"/>
+<text class="t" x="598" y="148" text-anchor="middle" dominant-baseline="central">AgentLoop</text>
+<text class="t" x="598" y="170" text-anchor="middle" dominant-baseline="central">ReAct loop</text>
+<rect class="surface" x="1236" y="14" width="273" height="74" rx="7"/>
+<text class="t" x="1373" y="40" text-anchor="middle" dominant-baseline="central">LLMProvider</text>
+<text class="t" x="1373" y="62" text-anchor="middle" dominant-baseline="central">Anthropic-compatible endpoint</text>
+<rect class="surface" x="1235" y="122" width="275" height="74" rx="7"/>
+<text class="t" x="1373" y="148" text-anchor="middle" dominant-baseline="central">ToolRegistry</text>
+<text class="t" x="1373" y="170" text-anchor="middle" dominant-baseline="central">8 built-in families + MCP tools</text>
+<rect class="surface soft" x="1228" y="230" width="288" height="74" rx="7"/>
+<text class="t" x="1373" y="256" text-anchor="middle" dominant-baseline="central">permissions · compaction</text>
+<text class="t" x="1373" y="278" text-anchor="middle" dominant-baseline="central">session memory · trace · EventBus</text>
+</svg>
