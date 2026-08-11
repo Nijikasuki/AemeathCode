@@ -27,7 +27,7 @@
 
 给它一个目标,它自己规划步骤、读写文件、执行命令、观察结果,循环推进直到做完 —— 全程在终端里看得见。
 
-它由两个进程组成:前台界面和后台常驻的 daemon,中间是一条自己实现的多路复用协议。ReAct 循环、工具注册表、会话记忆、权限审批、上下文压缩、子 agent、MCP 客户端,全部用纯 Python + asyncio 从零写,**没有用任何 agent 框架**。
+它由两个进程组成:前台界面和后台常驻的 daemon,中间是一条自己实现的多路复用协议。ReAct 循环、工具注册表、会话记忆、权限审批、上下文压缩、子 agent、MCP 客户端,全部用纯 Python + asyncio 从零写,没有用任何 agent 框架。
 
 这是一个学习与展示型项目。它能真实执行 shell 命令、真实写文件 —— 请在你信任的目录里跑(见[安全声明](#安全声明))。
 
@@ -35,7 +35,7 @@
 
 ## 装上,跑起来
 
-**支持 Linux / macOS / Windows + WSL2。Windows 原生跑不起来**,而且不打算适配。
+支持 Linux / macOS / Windows + WSL2。Windows 原生跑不起来,而且不打算适配。
 
 <details>
 <summary>为什么 Windows 原生不支持</summary>
@@ -63,7 +63,7 @@ wsl --install          # 管理员 PowerShell,装完重启,之后所有命令都
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-> 装完 **当前终端还用不了 `uv`**:安装脚本改的是 shell 配置文件,得重开终端,或者 `source ~/.bashrc`。
+> 装完 当前终端还用不了 `uv`:安装脚本改的是 shell 配置文件,得重开终端,或者 `source ~/.bashrc`。
 
 ### 2. 装 AemeathCode
 
@@ -71,9 +71,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install aemeathcode
 ```
 
-> 如果 uv 提示 `~/.local/bin` 不在 `PATH` 上,跑一次 `uv tool update-shell`,**然后同样要重开终端**。
+> 如果 uv 提示 `~/.local/bin` 不在 `PATH` 上,跑一次 `uv tool update-shell`,然后同样要重开终端。
 >
-> 注意**命令名是 `aemeath`,包名是 `aemeathcode`**。升级和卸载都用包名:
+> 注意命令名是 `aemeath`,包名是 `aemeathcode`。升级和卸载都用包名:
 > `uv tool upgrade aemeathcode` / `uv tool uninstall aemeathcode`。
 >
 > 已经有 pipx 的话直接 `pipx install aemeathcode` 也一样,不用为了这个再装 uv。
@@ -84,11 +84,13 @@ uv tool install aemeathcode
 aemeath
 ```
 
-就这一条。第一次跑会弹配置向导问你三件事(API Key、Base URL、模型名),填完就进界面。
+就这一条。第一次跑会弹配置向导问你三件事(API Key、Base URL、模型名),填完就进界面:
+
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/splash.png" width="100%" alt="AemeathCode TUI 启动后的空态界面">
 
 底层是「后台 daemon + 前端」双进程,但你不用管它 —— `aemeath` 会自己探活,没有就在后台拉起 daemon 再进界面(像 `docker` 那样)。daemon 常驻,下次秒进;用完 `aemeath stop` 关掉。
 
-对接任何 **Anthropic Messages API 兼容**的端点:官方、DeepSeek、自建网关都行。
+对接任何 Anthropic Messages API 兼容的端点:官方、DeepSeek、自建网关都行。
 
 ---
 
@@ -98,7 +100,7 @@ aemeath
 
 一个 run 就是一段循环:把对话发给模型 → 模型要么直接回答、要么说「我要调这几个工具」→ 执行工具 → 把结果塞回对话 → 再发给模型 → 直到它不再要工具。
 
-看起来简单,真正难的是**配对**:模型发出的每一个 `tool_use` 块,下一轮必须有一个 `tool_result` 块对应上,少一个、顺序错一个,整轮对话在 API 那边就废了。工具执行失败、被权限拒绝、参数缺失 —— 这些情况下**照样要回一个 result**,只是内容是错误说明。这条铁律是 `agent/loop.py` 里最不能出错的地方。
+看起来简单,真正难的是配对:模型发出的每一个 `tool_use` 块,下一轮必须有一个 `tool_result` 块对应上,少一个、顺序错一个,整轮对话在 API 那边就废了。工具执行失败、被权限拒绝、参数缺失 —— 这些情况下照样要回一个 result,只是内容是错误说明。这条铁律是 `agent/loop.py` 里最不能出错的地方。
 
 内置八类工具:读文件、写文件、跑 shell、列目录、任务增删查改、长期笔记、加载 skill、派子 agent。
 
@@ -106,12 +108,12 @@ aemeath
 
 <img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/approval.png" width="100%" alt="权限审批:写文件前弹出确认,并显示完整的待写内容">
 
-写文件和执行命令会在**真正执行之前**被拦下来,daemon **反向**问前端要授权 —— 同一条 TCP 连接,平时是客户端发请求、daemon 回响应,审批时方向反过来。
+写文件和执行命令会在真正执行之前被拦下来,daemon 反向问前端要授权 —— 同一条 TCP 连接,平时是客户端发请求、daemon 回响应,审批时方向反过来。
 
 两个刻意的设计:
 
-- **审批面板显示它要写的完整内容**,不是只给你一个文件名让你盲签。审批请求自带完整参数,不依赖事件流。
-- **被拒绝的调用会留痕**。Content 里画一行 `× write_file / 权限被拒绝`,而 Changes 面板不给它记账 —— 因为它压根没执行。「这个工具开始执行了」和「模型想调它」是两件事,事件流里分得很清楚。
+- 审批面板显示它要写的完整内容,不是只给你一个文件名让你盲签。审批请求自带完整参数,不依赖事件流。
+- 被拒绝的调用会留痕。Content 里画一行 `× write_file / 权限被拒绝`,而 Changes 面板不给它记账 —— 因为它压根没执行。「这个工具开始执行了」和「模型想调它」是两件事,事件流里分得很清楚。
 
 批准时可以选「这次」或「永远」,选了永远会记住,下次同类操作不再问。
 
@@ -129,15 +131,15 @@ aemeath
 
 ### 上下文满了会自己压
 
-历史越滚越长,逼近 token 预算时自动触发压缩:老轮次交给**一次独立的辅助 LLM 调用**概括成摘要,最近几轮**逐字保留**(尾巴逐字比全部概括更 faithful —— 模型刚说过的话不该被转述)。
+历史越滚越长,逼近 token 预算时自动触发压缩:老轮次交给一次独立的辅助 LLM 调用概括成摘要,最近几轮逐字保留(尾巴逐字比全部概括更 faithful —— 模型刚说过的话不该被转述)。
 
-压缩只动内存里的工作副本,**磁盘上的原始记录一个字不改**。所以 resume 回来拿到的仍然是完整历史。
+压缩只动内存里的工作副本,磁盘上的原始记录一个字不改。所以 resume 回来拿到的仍然是完整历史。
 
 ### 能力边界可以往外扩
 
-- **子 agent** —— 主 agent 把子任务丢进一个隔离的上下文里跑,只有结果回来,中间过程不污染主对话。子 agent 还能扮演不同角色(profiles)。
-- **Skills** —— 按需加载的操作手册。平时只有**简介**常驻 system prompt(让模型知道「有这么个技能」),模型真调 `use_skill` 时才把正文读进来,所以放几十个 skill 也撑不爆上下文。
-- **MCP** —— 作为客户端连外部 server(GitHub、文件系统等),把它们的工具注册进**同一张 ToolRegistry**。对模型来说,MCP 工具和内置工具长得一模一样,它分不出来。
+- 子 agent —— 主 agent 把子任务丢进一个隔离的上下文里跑,只有结果回来,中间过程不污染主对话。子 agent 还能扮演不同角色(profiles)。
+- Skills —— 按需加载的操作手册。平时只有简介常驻 system prompt(让模型知道「有这么个技能」),模型真调 `use_skill` 时才把正文读进来,所以放几十个 skill 也撑不爆上下文。
+- MCP —— 作为客户端连外部 server(GitHub、文件系统等),把它们的工具注册进同一张 ToolRegistry。对模型来说,MCP 工具和内置工具长得一模一样,它分不出来。
 
 自定义 skill、项目记忆、MCP 配置怎么写,见 [`examples/`](https://github.com/Nijikasuki/AemeathCode/tree/main/examples)。
 
@@ -145,18 +147,18 @@ aemeath
 
 ## S0 → S7:它是怎么长出来的
 
-这个项目不是一次写成的,是**八个阶段一层一层推出来**的,每个阶段解决一个明确的工程问题。这张表本身就是一条「怎么从零搭一个 Agent」的路线:
+这个项目不是一次写成的,是八个阶段一层一层推出来的,每个阶段解决一个明确的工程问题。这张表本身就是一条「怎么从零搭一个 Agent」的路线:
 
 | 阶段 | 解决的工程问题 | 关键机制 |
 |---|---|---|
-| **S0** | 两个进程怎么可靠通信 | 守护进程、TCP 粘包与分帧、NDJSON、JSON-RPC 2.0、asyncio 并发、优雅关闭 |
-| **S1** | 怎么让它自己用工具干活 | ReAct 循环、工具注册表、领域类型 / 防腐层、发布订阅事件、依赖注入 |
-| **S2** | 一根连接怎么同时跑请求和事件流 | 多路复用、Future 请求/响应配对、后台作业、pub/sub-over-network、状态与逻辑分离 |
-| **S3** | 从只读观察者到会写会跑会规划 | 异步子进程、路径安全、任务系统、Trace 可观测性、装饰器 / 包装器模式 |
-| **S4** | 怎么跨轮次 / 跨会话记住东西 | 记忆三层作用域、增量存储 + 索引、指针模型、tool_use/tool_result 配对铁律、进程组信号 |
-| **S5** | 危险操作怎么在动手前拦下来 | 反向 RPC(daemon 问客户端)、三态 policy、记住已批、fail-closed、多态替换条件分支 |
-| **S6** | 上下文满了怎么办 | token 预算判定、自动压缩、辅助 LLM 通道、工作副本与持久副本分家 |
-| **S7** | 怎么扩展能力边界 | 子 agent(隔离上下文)、角色 profiles、按需加载的 skills、MCP 客户端(stdio JSON-RPC 握手) |
+| S0 | 两个进程怎么可靠通信 | 守护进程、TCP 粘包与分帧、NDJSON、JSON-RPC 2.0、asyncio 并发、优雅关闭 |
+| S1 | 怎么让它自己用工具干活 | ReAct 循环、工具注册表、领域类型 / 防腐层、发布订阅事件、依赖注入 |
+| S2 | 一根连接怎么同时跑请求和事件流 | 多路复用、Future 请求/响应配对、后台作业、pub/sub-over-network、状态与逻辑分离 |
+| S3 | 从只读观察者到会写会跑会规划 | 异步子进程、路径安全、任务系统、Trace 可观测性、装饰器 / 包装器模式 |
+| S4 | 怎么跨轮次 / 跨会话记住东西 | 记忆三层作用域、增量存储 + 索引、指针模型、tool_use/tool_result 配对铁律、进程组信号 |
+| S5 | 危险操作怎么在动手前拦下来 | 反向 RPC(daemon 问客户端)、三态 policy、记住已批、fail-closed、多态替换条件分支 |
+| S6 | 上下文满了怎么办 | token 预算判定、自动压缩、辅助 LLM 通道、工作副本与持久副本分家 |
+| S7 | 怎么扩展能力边界 | 子 agent(隔离上下文)、角色 profiles、按需加载的 skills、MCP 客户端(stdio JSON-RPC 握手) |
 
 对应的 git tag 是 `stage-0` … `stage-7`,想顺着读源码可以按这个顺序 checkout。
 
@@ -166,23 +168,16 @@ aemeath
 
 ### 两个进程,一条连接
 
-界面和大脑是两个独立进程。中间只有**一条** TCP 连接 —— 不是一个端口一件事,而是一条线上跑三种完全不同的流量。
+界面和大脑是两个独立进程,中间只有一条 TCP 连接 —— 不是一个端口一件事,而是一条线上跑三种完全不同的流量。分帧用 NDJSON,信封是 JSON-RPC 2.0。
 
 ```mermaid
 flowchart LR
-    FE["前端进程<br/>TUI · Textual<br/>CLI · run / chat / watch"]
-    LINK["一条 TCP 连接<br/>NDJSON 分帧<br/>JSON-RPC 2.0 多路复用"]
-    BE["daemon 进程 · aemeath core<br/>Runner · AgentLoop · 工具层<br/>权限 · 压缩 · 会话 · Trace"]
-    MCPS["外部 MCP server<br/>GitHub · 文件系统 · …"]
+    FE["前端进程 · TUI / CLI"]
+    LINK["一条 TCP 连接"]
+    BE["daemon · aemeath core"]
 
     FE <--> LINK
     LINK <--> BE
-    BE <-->|"stdio JSON-RPC"| MCPS
-
-    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
-    classDef wire fill:none,stroke:#d98cb3,stroke-width:2px
-    class FE,BE,MCPS box
-    class LINK wire
 ```
 
 那条线上的三种流量:
@@ -193,29 +188,22 @@ flowchart LR
 | 事件流 | daemon → 前端(单向推) | 模型逐字吐、工具开始 / 结束、触发压缩 |
 | 反向审批 | daemon → 前端 → daemon | 要写文件、要跑命令,停下来等你点同意 |
 
-第三种是这套设计里最不直观的一处:**方向反过来了**,daemon 变成发起方,前端变成回答方。但它和前两种共用同一条连接、同一套信封格式、同一个读循环 —— 靠信封类型区分,而不是靠再开一条线。
+第三种是这套设计里最不直观的一处:方向反过来了,daemon 变成发起方,前端变成回答方。但它和前两种共用同一条连接、同一套信封格式、同一个读循环 —— 靠信封类型区分,而不是靠再开一条线。
 
 ### 一个 run 在 daemon 里走过哪里
 
 ```mermaid
 flowchart LR
-    IN(["run 请求"]) --> RUNNER["Runner<br/>建一个后台作业"]
-    RUNNER --> LOOP["AgentLoop<br/>ReAct 循环"]
-    LOOP -->|"messages"| PROV["LLMProvider<br/>Anthropic 兼容端点"]
-    PROV -->|"tool_use"| LOOP
-    LOOP -->|"执行"| TOOLS["ToolRegistry<br/>8 类内置工具 + MCP 工具"]
+    IN(["run 请求"]) --> RUNNER["Runner"]
+    RUNNER --> LOOP["AgentLoop · ReAct 循环"]
+    LOOP <-->|"messages"| PROV["LLMProvider"]
+    LOOP -->|"tool_use"| PERM["权限审批"]
+    PERM -->|"批准"| TOOLS["ToolRegistry"]
     TOOLS -->|"tool_result"| LOOP
-    LOOP -.->|"每一步都经过"| SVC["权限审批 · 上下文压缩<br/>会话记忆 · Trace · EventBus"]
-
-    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
-    classDef hot fill:none,stroke:#d98cb3,stroke-width:2px
-    classDef side fill:none,stroke:#8b93a7,stroke-width:1px,stroke-dasharray:4 4
-    class IN,RUNNER,PROV,TOOLS box
-    class LOOP hot
-    class SVC side
+    TOOLS <-->|"stdio JSON-RPC"| MCP["外部 MCP server"]
 ```
 
-两条回边就是循环本身:`tool_use` 从模型回到 loop、`tool_result` 从工具回到 loop。跳出条件只有一个 —— 模型这一轮没再要工具。
+`tool_use → 权限审批 → ToolRegistry → tool_result` 绕回 loop,这一圈就是循环本身;跳出条件只有一个 —— 模型这一轮没再要工具。权限审批夹在 loop 和工具中间,所以被拒绝的调用根本没走到工具那一步,但它仍然要带着一句错误说明回到 loop —— 否则 `tool_use` 就配不上对了。
 
 源码在 `src/aemeathcode/`:
 
@@ -260,7 +248,7 @@ TUI 里的快捷键:`^↑`/`^↓` 选会话 · `^u`/`^d` 滚 content · `^j`/`^k
 
 平时不用管 —— 第一次跑的向导已经把全局配置写好了。想改随时 `aemeath init` 重跑。
 
-配置按三级读取,**上面的覆盖下面的**:
+配置按三级读取,上面的覆盖下面的:
 
 | 优先级 | 位置 | 用途 |
 |---|---|---|
@@ -276,7 +264,7 @@ cp .env.example .aemeath/.env   # ② 从模板抄一份改(全部可用变量�
                                 # ③ 或者手写 .aemeath/.env,只放要覆盖的那几行
 ```
 
-> 项目级配置读的是 `.aemeath/.env`,**不是你项目根目录的 `.env`**。这是刻意的:`.env` 里往往有你自己的 `DATABASE_URL` 和各种密钥,而 agent 有 `bash` 工具、子进程会继承环境变量 —— 只读自己的文件,你的密钥就不会被卷进来。`.aemeath/` 建出来时自带一张自我忽略的 `.gitignore`。
+> 项目级配置读的是 `.aemeath/.env`,不是你项目根目录的 `.env`。这是刻意的:`.env` 里往往有你自己的 `DATABASE_URL` 和各种密钥,而 agent 有 `bash` 工具、子进程会继承环境变量 —— 只读自己的文件,你的密钥就不会被卷进来。`.aemeath/` 建出来时自带一张自我忽略的 `.gitignore`。
 
 </details>
 
@@ -299,7 +287,7 @@ uv run pytest -q      # 114 passed
 
 ## 安全声明
 
-AemeathCode 能**真实执行 shell 命令、读写本地文件**。虽然内置了权限审批,但请务必:
+AemeathCode 能真实执行 shell 命令、读写本地文件。虽然内置了权限审批,但请务必:
 
 - 在你信任的、隔离的环境(容器 / 沙箱 / 专用目录)里跑,别直接指着重要数据用;
 - 审批弹窗出现时看清命令再批 —— `allow_always` 会记住,别对危险命令随手放行;

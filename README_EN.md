@@ -27,7 +27,7 @@
 
 Give it a goal and it plans the steps, reads and writes files, runs commands, observes results, and keeps looping until the job is done —— all visible live in your terminal.
 
-It is two processes: a frontend and a resident background daemon, joined by a multiplexed protocol implemented here from scratch. The ReAct loop, tool registry, session memory, permission approval, context compaction, sub-agents and the MCP client are all pure Python + asyncio —— **no agent framework involved**.
+It is two processes: a frontend and a resident background daemon, joined by a multiplexed protocol implemented here from scratch. The ReAct loop, tool registry, session memory, permission approval, context compaction, sub-agents and the MCP client are all pure Python + asyncio —— no agent framework involved.
 
 This is a learning and showcase project. It really executes shell commands and really writes files —— run it in a directory you trust (see [Security](#security)).
 
@@ -35,7 +35,7 @@ This is a learning and showcase project. It really executes shell commands and r
 
 ## Install and run
 
-**Supported on Linux / macOS / Windows + WSL2. Native Windows does not work**, and there are no plans to port it.
+Supported on Linux / macOS / Windows + WSL2. Native Windows does not work, and there are no plans to port it.
 
 <details>
 <summary>Why native Windows isn't supported</summary>
@@ -63,7 +63,7 @@ The only prerequisite. uv is a single static binary — you don't need Python fi
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-> **`uv` won't work in the current terminal yet**: the installer edits your shell config, so reopen the terminal or run `source ~/.bashrc`.
+> `uv` won't work in the current terminal yet: the installer edits your shell config, so reopen the terminal or run `source ~/.bashrc`.
 
 ### 2. Install AemeathCode
 
@@ -71,9 +71,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install aemeathcode
 ```
 
-> If uv warns that `~/.local/bin` isn't on your `PATH`, run `uv tool update-shell` once — **and reopen the terminal again**.
+> If uv warns that `~/.local/bin` isn't on your `PATH`, run `uv tool update-shell` once — and reopen the terminal again.
 >
-> Note the **command is `aemeath`, the package is `aemeathcode`**. Upgrade and uninstall use the package name:
+> Note the command is `aemeath`, the package is `aemeathcode`. Upgrade and uninstall use the package name:
 > `uv tool upgrade aemeathcode` / `uv tool uninstall aemeathcode`.
 >
 > Already have pipx? `pipx install aemeathcode` works just as well — no need to install uv for this.
@@ -84,11 +84,13 @@ uv tool install aemeathcode
 aemeath
 ```
 
-That's the whole thing. The first run opens a setup wizard asking for three values (API key, base URL, model name), then drops you into the UI.
+That's the whole thing. The first run opens a setup wizard asking for three values (API key, base URL, model name), then drops you into the UI:
+
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/splash.png" width="100%" alt="The AemeathCode TUI right after launch">
 
 Underneath it's a two-process "background daemon + frontend" architecture, but you never manage it —— `aemeath` probes for the daemon, spawns it in the background if absent, then opens the UI (much like `docker`). The daemon stays resident so the next launch is instant; `aemeath stop` shuts it down.
 
-Works with any **Anthropic Messages API–compatible** endpoint: official, DeepSeek, your own gateway.
+Works with any Anthropic Messages API–compatible endpoint: official, DeepSeek, your own gateway.
 
 ---
 
@@ -98,7 +100,7 @@ Works with any **Anthropic Messages API–compatible** endpoint: official, DeepS
 
 A run is a loop: send the conversation to the model → it either answers or says "call these tools" → execute them → feed the results back → send again → until it stops asking for tools.
 
-Simple in outline; the hard part is **pairing**. Every `tool_use` block the model emits must be answered by a matching `tool_result` block on the next turn — miss one, or get the order wrong, and the API rejects the whole conversation. A tool that crashed, got denied by permissions, or was called with missing arguments **still has to return a result**, just one whose content is the error. That rule is the least forgiving part of `agent/loop.py`.
+Simple in outline; the hard part is pairing. Every `tool_use` block the model emits must be answered by a matching `tool_result` block on the next turn — miss one, or get the order wrong, and the API rejects the whole conversation. A tool that crashed, got denied by permissions, or was called with missing arguments still has to return a result, just one whose content is the error. That rule is the least forgiving part of `agent/loop.py`.
 
 Eight built-in tool families: read file, write file, run shell, list directory, task CRUD, long-term notes, load a skill, spawn a sub-agent.
 
@@ -106,12 +108,12 @@ Eight built-in tool families: read file, write file, run shell, list directory, 
 
 <img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/approval.png" width="100%" alt="Permission approval: a confirmation before writing a file, showing the full content to be written">
 
-Writing files and running commands are intercepted **before execution**, and the daemon asks the frontend for authorization **in reverse** —— same TCP connection, but where the client normally sends requests and the daemon replies, approvals flow the other way.
+Writing files and running commands are intercepted before execution, and the daemon asks the frontend for authorization in reverse —— same TCP connection, but where the client normally sends requests and the daemon replies, approvals flow the other way.
 
 Two deliberate choices:
 
-- **The approval panel shows the full content it intends to write**, not just a filename to blind-sign. The approval request carries the complete arguments itself; it doesn't scrape them from the event stream.
-- **Denied calls leave a trace.** Content draws a `× write_file / permission denied` line, while the Changes panel records nothing — because nothing ran. "This tool started executing" and "the model wanted to call it" are two different facts, and the event stream keeps them apart.
+- The approval panel shows the full content it intends to write, not just a filename to blind-sign. The approval request carries the complete arguments itself; it doesn't scrape them from the event stream.
+- Denied calls leave a trace. Content draws a `× write_file / permission denied` line, while the Changes panel records nothing — because nothing ran. "This tool started executing" and "the model wanted to call it" are two different facts, and the event stream keeps them apart.
 
 Approve once, or approve always; "always" is remembered and won't ask again for the same kind of operation.
 
@@ -129,15 +131,15 @@ Messages are stored incrementally per run, with an index that stitches them into
 
 ### It compacts itself when context fills up
 
-As history grows toward the token budget, compaction kicks in automatically: older turns go to **a separate auxiliary LLM call** to be summarized, while the most recent turns are **kept verbatim** (a verbatim tail is more faithful than summarizing everything — what the model just said shouldn't be paraphrased back at it).
+As history grows toward the token budget, compaction kicks in automatically: older turns go to a separate auxiliary LLM call to be summarized, while the most recent turns are kept verbatim (a verbatim tail is more faithful than summarizing everything — what the model just said shouldn't be paraphrased back at it).
 
-Compaction only touches the in-memory working copy; **the record on disk is left byte-for-byte intact**. So a resumed session still gets the full history.
+Compaction only touches the in-memory working copy; the record on disk is left byte-for-byte intact. So a resumed session still gets the full history.
 
 ### The capability boundary is extensible
 
-- **Sub-agents** —— the main agent hands a sub-task to an isolated context; only the result comes back, and the intermediate steps never pollute the main conversation. Sub-agents can also take on different roles (profiles).
-- **Skills** —— on-demand playbooks. Only the **summary** sits in the system prompt permanently (so the model knows the skill exists); the body is loaded only when it actually calls `use_skill`, so dozens of skills still won't blow up the context.
-- **MCP** —— acts as a client to external servers (GitHub, filesystem, …) and registers their tools into **the same ToolRegistry**. From the model's side, an MCP tool and a built-in tool are indistinguishable.
+- Sub-agents —— the main agent hands a sub-task to an isolated context; only the result comes back, and the intermediate steps never pollute the main conversation. Sub-agents can also take on different roles (profiles).
+- Skills —— on-demand playbooks. Only the summary sits in the system prompt permanently (so the model knows the skill exists); the body is loaded only when it actually calls `use_skill`, so dozens of skills still won't blow up the context.
+- MCP —— acts as a client to external servers (GitHub, filesystem, …) and registers their tools into the same ToolRegistry. From the model's side, an MCP tool and a built-in tool are indistinguishable.
 
 See [`examples/`](https://github.com/Nijikasuki/AemeathCode/tree/main/examples) for how to write custom skills, project memory, and MCP config.
 
@@ -145,18 +147,18 @@ See [`examples/`](https://github.com/Nijikasuki/AemeathCode/tree/main/examples) 
 
 ## S0 → S7: how it grew
 
-This wasn't written in one pass — it was **pushed out layer by layer across eight stages**, each solving one concrete engineering problem. The table doubles as a roadmap for building an agent from scratch:
+This wasn't written in one pass — it was pushed out layer by layer across eight stages, each solving one concrete engineering problem. The table doubles as a roadmap for building an agent from scratch:
 
 | Stage | Engineering problem | Key mechanisms |
 |---|---|---|
-| **S0** | How can two processes communicate reliably | Daemon, TCP framing, NDJSON, JSON-RPC 2.0, asyncio concurrency, graceful shutdown |
-| **S1** | How to make it use tools on its own | ReAct loop, tool registry, domain types / anti-corruption layer, pub/sub events, dependency injection |
-| **S2** | How one link carries both requests and an event stream | Multiplexing, Future-based request/response pairing, background jobs, pub/sub-over-network, state/logic separation |
-| **S3** | From read-only observer to writing, running, planning | Async subprocesses, path safety, task system, trace observability, decorator/wrapper pattern |
-| **S4** | How to remember across turns and sessions | Three memory scopes, incremental storage + index, pointer model, the tool_use/tool_result pairing rule, process-group signals |
-| **S5** | How to intercept dangerous operations before they happen | Reverse RPC (daemon asks the client), tri-state policy, remembered approvals, fail-closed, polymorphism over conditionals |
-| **S6** | What to do when context fills up | Token budget checks, auto-compaction, auxiliary LLM channel, working copy vs. persistent copy |
-| **S7** | How to extend the capability boundary | Sub-agents (isolated context), agent profiles, on-demand skills, MCP client (stdio JSON-RPC handshake) |
+| S0 | How can two processes communicate reliably | Daemon, TCP framing, NDJSON, JSON-RPC 2.0, asyncio concurrency, graceful shutdown |
+| S1 | How to make it use tools on its own | ReAct loop, tool registry, domain types / anti-corruption layer, pub/sub events, dependency injection |
+| S2 | How one link carries both requests and an event stream | Multiplexing, Future-based request/response pairing, background jobs, pub/sub-over-network, state/logic separation |
+| S3 | From read-only observer to writing, running, planning | Async subprocesses, path safety, task system, trace observability, decorator/wrapper pattern |
+| S4 | How to remember across turns and sessions | Three memory scopes, incremental storage + index, pointer model, the tool_use/tool_result pairing rule, process-group signals |
+| S5 | How to intercept dangerous operations before they happen | Reverse RPC (daemon asks the client), tri-state policy, remembered approvals, fail-closed, polymorphism over conditionals |
+| S6 | What to do when context fills up | Token budget checks, auto-compaction, auxiliary LLM channel, working copy vs. persistent copy |
+| S7 | How to extend the capability boundary | Sub-agents (isolated context), agent profiles, on-demand skills, MCP client (stdio JSON-RPC handshake) |
 
 The matching git tags are `stage-0` … `stage-7` — check them out in order to read the source the way it was written.
 
@@ -166,23 +168,16 @@ The matching git tags are `stage-0` … `stage-7` — check them out in order to
 
 ### Two processes, one connection
 
-The interface and the brain are separate processes, joined by exactly **one** TCP connection — not a port per concern, but three very different kinds of traffic sharing a single wire.
+The interface and the brain are separate processes, joined by exactly one TCP connection — not a port per concern, but three very different kinds of traffic sharing a single wire. Framing is NDJSON; the envelope is JSON-RPC 2.0.
 
 ```mermaid
 flowchart LR
-    FE["Frontend process<br/>TUI · Textual<br/>CLI · run / chat / watch"]
-    LINK["One TCP connection<br/>NDJSON framing<br/>JSON-RPC 2.0, multiplexed"]
-    BE["daemon process · aemeath core<br/>Runner · AgentLoop · tools<br/>permissions · compaction · sessions · trace"]
-    MCPS["External MCP server<br/>GitHub · filesystem · …"]
+    FE["Frontend · TUI / CLI"]
+    LINK["One TCP connection"]
+    BE["daemon · aemeath core"]
 
     FE <--> LINK
     LINK <--> BE
-    BE <-->|"stdio JSON-RPC"| MCPS
-
-    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
-    classDef wire fill:none,stroke:#d98cb3,stroke-width:2px
-    class FE,BE,MCPS box
-    class LINK wire
 ```
 
 The three kinds of traffic on that wire:
@@ -193,29 +188,22 @@ The three kinds of traffic on that wire:
 | Event stream | daemon → frontend (one-way push) | Model streaming tokens, tool start / finish, compaction fired |
 | Reverse approval | daemon → frontend → daemon | About to write a file or run a command — stops and waits for your yes |
 
-The third one is the least intuitive part of the design: **the direction flips**, the daemon becomes the asker and the frontend the responder. Yet it shares the same connection, the same envelope format and the same read loop as the other two — distinguished by envelope type, not by opening a second wire.
+The third one is the least intuitive part of the design: the direction flips, the daemon becomes the asker and the frontend the responder. Yet it shares the same connection, the same envelope format and the same read loop as the other two — distinguished by envelope type, not by opening a second wire.
 
 ### Where a run goes inside the daemon
 
 ```mermaid
 flowchart LR
-    IN(["run request"]) --> RUNNER["Runner<br/>create a background job"]
-    RUNNER --> LOOP["AgentLoop<br/>ReAct loop"]
-    LOOP -->|"messages"| PROV["LLMProvider<br/>Anthropic-compatible endpoint"]
-    PROV -->|"tool_use"| LOOP
-    LOOP -->|"execute"| TOOLS["ToolRegistry<br/>8 built-in families + MCP tools"]
+    IN(["run request"]) --> RUNNER["Runner"]
+    RUNNER --> LOOP["AgentLoop · ReAct loop"]
+    LOOP <-->|"messages"| PROV["LLMProvider"]
+    LOOP -->|"tool_use"| PERM["Permission check"]
+    PERM -->|"approved"| TOOLS["ToolRegistry"]
     TOOLS -->|"tool_result"| LOOP
-    LOOP -.->|"passes through every step"| SVC["permissions · compaction<br/>session memory · trace · EventBus"]
-
-    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
-    classDef hot fill:none,stroke:#d98cb3,stroke-width:2px
-    classDef side fill:none,stroke:#8b93a7,stroke-width:1px,stroke-dasharray:4 4
-    class IN,RUNNER,PROV,TOOLS box
-    class LOOP hot
-    class SVC side
+    TOOLS <-->|"stdio JSON-RPC"| MCP["External MCP server"]
 ```
 
-The two back-edges *are* the loop: `tool_use` returning from the model, `tool_result` returning from the tools. There is exactly one exit condition — the model stopped asking for tools.
+`tool_use → permission check → ToolRegistry → tool_result` circling back to the loop *is* the loop; there is exactly one exit condition — the model stopped asking for tools. The permission gate sits between the loop and the tools, so a denied call never reaches the tool at all — yet it still has to come back carrying an error message, or the `tool_use` would be left unpaired.
 
 Source lives in `src/aemeathcode/`:
 
@@ -260,7 +248,7 @@ Keys inside the TUI: `^↑`/`^↓` switch session · `^u`/`^d` scroll content ·
 
 Usually nothing to do — the first-run wizard already wrote your global config. Run `aemeath init` any time to change it.
 
-Config is read from three levels, **higher overrides lower**:
+Config is read from three levels, higher overrides lower:
 
 | Priority | Location | Purpose |
 |---|---|---|
@@ -276,7 +264,7 @@ cp .env.example .aemeath/.env   # 2. copy the template and edit (every variable 
                                 # 3. or hand-write .aemeath/.env with only the lines you override
 ```
 
-> Project config lives in `.aemeath/.env`, **not your project's own `.env`**. That is deliberate: your `.env` usually holds `DATABASE_URL` and other secrets, and the agent has a `bash` tool whose subprocesses inherit the environment — reading only our own file keeps your secrets out of it. `.aemeath/` ships with a self-ignoring `.gitignore`.
+> Project config lives in `.aemeath/.env`, not your project's own `.env`. That is deliberate: your `.env` usually holds `DATABASE_URL` and other secrets, and the agent has a `bash` tool whose subprocesses inherit the environment — reading only our own file keeps your secrets out of it. `.aemeath/` ships with a self-ignoring `.gitignore`.
 
 </details>
 
@@ -299,7 +287,7 @@ Tests cover framing / registry / policy / invocation / broadcaster / EventBus / 
 
 ## Security
 
-AemeathCode **really executes shell commands and reads/writes local files**. Permission approval is built in, but please:
+AemeathCode really executes shell commands and reads/writes local files. Permission approval is built in, but please:
 
 - Run it in a trusted, isolated environment (container / sandbox / dedicated directory); don't point it at data that matters;
 - Read the command before approving —— `allow_always` is remembered, so don't wave dangerous ones through;
