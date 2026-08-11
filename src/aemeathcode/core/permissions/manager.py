@@ -41,7 +41,7 @@ class PermissionsManager:
         detail = tool.permission_detail(params)
         if len(detail) > _DETAIL_MAX:
             detail = detail[:_DETAIL_MAX] + "…"
-        decision = await approver.ask(tool.name, detail, run_id)
+        decision = await approver.ask(tool.name, detail, run_id, params)
         if decision == "deny":
             return PermissionResult(False, "用户拒绝了本次操作")
         if decision == "allow_always":

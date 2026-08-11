@@ -36,6 +36,17 @@ def _ctx(allowed: bool = True):
     return SimpleNamespace(run_id="r1", services=services)
 
 
+def _recorder(bus: EventBus) -> list:
+    """把 bus 上跑过的事件按顺序收下来,用来断言 start/finish 的次序。"""
+    seen = []
+
+    async def handler(event):
+        seen.append(event)
+
+    bus.subscribe(handler)
+    return seen
+
+
 async def test_unknown_tool():
     result = await invoke_tool(registry=ToolRegistry(), tool_call=ToolCallBlock("1", "nope", {}),
                                bus=EventBus(), ctx=_ctx())
@@ -69,3 +80,47 @@ async def test_allowed_runs_tool():
     assert not result.is_error
     assert result.content == "done"
     assert t.invoked is True           # 放行 → 真的跑了工具
+
+
+async def test_denied_emits_no_start_event():
+    """权限拒绝【不发】tool.call_started。
+
+    这是 P1-5 的核心:前端(Changes / Tasks / Skills 面板)是拿 start 事件记账的,
+    只要 start 抢在审批之前发出去,拒绝掉的写入就会留在面板上,而文件根本没动。
+    """
+    r = ToolRegistry()
+    r.register(DummyTool("write_file"))
+    bus = EventBus()
+    seen = _recorder(bus)
+
+    await invoke_tool(registry=r, tool_call=ToolCallBlock("1", "write_file", {"path": "a.txt"}),
+                      bus=bus, ctx=_ctx(allowed=False))
+
+    types = [e.type for e in seen]
+    assert types == ["tool.call_finished"]          # 只有收尾,没有开始
+    finished = seen[0]
+    # 没有 start 事件配对了,finish 必须自带名字和参数,前端才画得出这一行
+    assert finished.tool_name == "write_file"
+    assert finished.params == {"path": "a.txt"}
+    assert finished.is_error is True
+
+
+async def test_allowed_emits_start_then_finish():
+    r = ToolRegistry()
+    r.register(DummyTool("write_file"))
+    bus = EventBus()
+    seen = _recorder(bus)
+
+    await invoke_tool(registry=r, tool_call=ToolCallBlock("1", "write_file", {"path": "a.txt"}),
+                      bus=bus, ctx=_ctx(allowed=True))
+
+    assert [e.type for e in seen] == ["tool.call_started", "tool.call_finished"]
+
+
+async def test_unknown_tool_emits_no_start_event():
+    bus = EventBus()
+    seen = _recorder(bus)
+    await invoke_tool(registry=ToolRegistry(), tool_call=ToolCallBlock("1", "nope", {}),
+                      bus=bus, ctx=_ctx())
+    assert [e.type for e in seen] == ["tool.call_finished"]
+    assert seen[0].tool_name == "nope"

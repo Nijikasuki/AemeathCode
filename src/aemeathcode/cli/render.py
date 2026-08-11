@@ -20,7 +20,11 @@ def render(event: dict) -> str:
         return f"{prefix}🔧 调用 {event['tool_name']}  参数={event['params']}"
     elif event["type"] == "tool.call_finished":
         icon = "❌" if event["is_error"] else "📄"
-        return f"{prefix}{icon} 结果: {_short(event['content'])}"
+        # 被闸门拦下的调用没有 call_started 打头(见 invocation.py),
+        # 这里补上工具名,否则只剩一句光秃秃的"权限被拒绝"不知道说的是谁
+        name = event.get("tool_name") or ""
+        who = f" {name}" if name else ""
+        return f"{prefix}{icon} 结果{who}: {_short(event['content'])}"
     elif event["type"] == "run.completed":
         icon = "✅" if event["status"] == "success" else "⚠️"
         return (

@@ -17,11 +17,13 @@ async def invoke_tool(registry : ToolRegistry,
                       bus : EventBus,
                       ctx:ExecutionContext) -> ToolResult:
 
-    await bus.publish(ToolCallStartEvent(tool_use_id = tool_call.id,tool_name=tool_call.name,params=tool_call.input,run_id=ctx.run_id))
     tool = registry.get(tool_call.name)
     # 调用前先查 schema 里 required 的参数缺没缺,缺了直接返回、不进 invoke(tool 为 None 时给空列表)
     missing = [p for p in tool.input_schema.get("required", []) if p not in tool_call.input] if tool else []
 
+    # 三道闸门。全部在【发 start 事件之前】跑完 —— tool.call_started 的语义是
+    # "这个工具真的开始执行了",不是"模型想调它"。被闸门拦下的调用只发 finish,
+    # 前端因此不会为一次没发生的写入记账(改前:拒绝审批后 Changes 面板照样出现那个文件)。
     if tool is None:
         result = ToolResult(content=f"未知工具:{tool_call.name}",is_error=True,error_type="unknown_tool")
     elif missing:
@@ -31,6 +33,7 @@ async def invoke_tool(registry : ToolRegistry,
         if not perm.allowed:
             result = ToolResult(content=f"权限被拒绝:{perm.reason}",is_error=True, error_type="permission_denied")
         else:
+            await bus.publish(ToolCallStartEvent(tool_use_id = tool_call.id,tool_name=tool_call.name,params=tool_call.input,run_id=ctx.run_id))
             start = time.monotonic()
             ts_start = datetime.now().isoformat()
             status: Literal["ok", "error"] = "ok"
@@ -60,5 +63,6 @@ async def invoke_tool(registry : ToolRegistry,
                                          status=status,
                                          error=error)
                     ctx.services.trace.emit(record)
-    await bus.publish(ToolCallFinishedEvent(tool_use_id=tool_call.id,is_error=result.is_error,content=result.content,run_id=ctx.run_id))
+    await bus.publish(ToolCallFinishedEvent(tool_use_id=tool_call.id,is_error=result.is_error,content=result.content,
+                                            tool_name=tool_call.name,params=tool_call.input,run_id=ctx.run_id))
     return result

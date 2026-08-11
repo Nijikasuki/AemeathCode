@@ -21,6 +21,10 @@ class ToolCallFinishedEvent(BaseModel):
     tool_use_id: str
     is_error: bool
     content: str
+    # 闸门(未知工具 / 缺参 / 权限拒绝)拦下来的调用【压根没有 start 事件】,
+    # 前端得只凭这一条 finish 就把它渲染出来 —— 所以名字和参数必须自带。
+    tool_name: str = ""
+    params: dict = Field(default_factory=dict)
     ts: str = Field(default_factory=lambda: datetime.now().isoformat())
     run_id: str
 

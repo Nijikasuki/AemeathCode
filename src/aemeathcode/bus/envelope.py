@@ -34,7 +34,10 @@ class AskEnvelope(BaseModel):
     kind :Literal["ask"] = "ask"
     approval_id: str
     tool_name: str
-    detail: str
+    detail: str          # 给人看的一句话摘要,会被截断(manager._DETAIL_MAX)
+    # 完整参数。detail 截断后不够审批(比如 write_file 要看全文),前端靠这个渲染预览。
+    # 【自带而不是让前端去事件流里捞】:审批是一次独立的请求,请求该自己说清求的是什么。
+    params: dict = Field(default_factory=dict)
     run_id: str
 
 class ReplyEnvelope(BaseModel):

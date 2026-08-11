@@ -41,6 +41,27 @@
 
 ## 🚀 快速开始
 
+### 0. 平台支持
+
+| 平台 | 状态 |
+|---|---|
+| Linux | ✅ 支持 |
+| macOS | ✅ 支持 |
+| Windows + WSL2 | ✅ 支持(**Windows 用户请走这条**) |
+| Windows 原生(PowerShell / CMD) | ❌ **不支持** |
+
+Windows 原生跑不起来,不是没适配好,是几处核心机制本身就依赖 POSIX:
+守护进程用 `add_signal_handler` 收 SIGINT/SIGTERM(Windows 事件循环没有这个 API)、
+`aemeath stop` 靠进程组信号收尾、`bash` 工具整个是按 POSIX shell 写的。
+
+Windows 上请在 WSL2 里用(装好后在 WSL 终端里按下面步骤走):
+
+```powershell
+wsl --install          # 管理员 PowerShell,装完重启
+```
+
+需要 **Python 3.12+**。
+
 ### 1. 安装
 
 ```bash

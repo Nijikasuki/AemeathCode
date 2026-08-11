@@ -39,6 +39,28 @@ Give it a goal and it plans the steps, calls tools, observes results, and loops 
 
 ## 🚀 Quick start
 
+### 0. Platform support
+
+| Platform | Status |
+|---|---|
+| Linux | ✅ Supported |
+| macOS | ✅ Supported |
+| Windows + WSL2 | ✅ Supported (**use this on Windows**) |
+| Windows native (PowerShell / CMD) | ❌ **Not supported** |
+
+Native Windows isn't a porting gap — several core mechanisms are POSIX by design:
+the daemon takes SIGINT/SIGTERM through `add_signal_handler` (absent from the Windows
+event loop), `aemeath stop` shuts down via process-group signals, and the `bash` tool
+is written against a POSIX shell throughout.
+
+On Windows, run it inside WSL2:
+
+```powershell
+wsl --install          # admin PowerShell, then reboot
+```
+
+Requires **Python 3.12+**.
+
 ### 1. Install
 
 ```bash

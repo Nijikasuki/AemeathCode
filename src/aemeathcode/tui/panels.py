@@ -297,8 +297,9 @@ def approval_preview(tool_name: str, params: dict, *, limit: int = 200) -> tuple
     为什么这件事重要:之前审批只显示 `write_file  bubble_sort.py` 一行,
     **用户是在对一个看不见内容的写入操作点"允许"**。那不叫审批,叫盲签。
 
-    好消息是 TUI 手上本来就有全部信息 —— `tool.call_started` 的 params 里带着完整
-    文件内容,而它先于权限请求到达。之前只是被我扔了,只留了个 path。零协议改动。
+    完整参数由 **ask 信封自带**(`AskEnvelope.params`)。最早的写法是去事件流里捞上一条
+    `tool.call_started` 的 params —— 那依赖"start 先于审批到达"这个巧合;后来把 start
+    挪到了权限检查之后(P1-5),巧合就没了。审批是一次独立的请求,该自己说清求的是什么。
     """
     text = Text()
     if tool_name == "write_file":

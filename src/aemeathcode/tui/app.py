@@ -140,7 +140,6 @@ class AemeathApp(App):
         self._group: ToolGroup | None = None
         self._group_started = 0.0
         self._calls: dict[str, tuple[ToolCall, Widget]] = {}
-        self._last_call: tuple[str, dict] = ("", {})
         # subagent 嵌套
         self._spawns: dict[str, SubagentBlock] = {}
         self._sub_runs: dict[str, SubagentBlock] = {}
@@ -393,7 +392,7 @@ class AemeathApp(App):
         elif etype == "tool.call_started":
             await self._on_tool_start(event, container, rule)
         elif etype == "tool.call_finished":
-            self._on_tool_finish(event)
+            await self._on_tool_finish(event, container, rule)
         elif etype in ("context.compacting", "context.compacted"):
             self._end_answer()
             sym, text, metric = event_row(event)
@@ -415,8 +414,13 @@ class AemeathApp(App):
         self._answer.append_token(event.get("content", ""))
         self._streaming = True
 
-    async def _on_tool_start(self, event: dict, container: Widget, rule: str) -> None:
-        # 后面跟了 tool call → 刚才那段文字是**过程叙述**不是最终回答 → 压暗
+    def _demote_answer(self) -> None:
+        """把当前正在流的那段文字定格并压暗 —— 后面跟了工具调用,
+        说明它是**过程叙述**而不是最终回答。
+
+        必须在挂任何工具行【之前】调:不定格的话,下一步的 token 会继续灌进这个
+        早就挂好的块里,视觉上工具行反而跑到了叙述的下面,时序看着是反的。
+        """
         if self._answer is not None:
             text = self._answer.answer_text
             self._answer.finalize()
@@ -426,6 +430,9 @@ class AemeathApp(App):
             self._answer = None
         self._streaming = False
         self.p_thinking.mark_segment()
+
+    async def _on_tool_start(self, event: dict, container: Widget, rule: str) -> None:
+        self._demote_answer()
 
         name = event.get("tool_name", "")
         params = event.get("params", {}) or {}
@@ -440,7 +447,6 @@ class AemeathApp(App):
         if name == "use_skill":
             self.p_skills.used(str(params.get("name", "")))
 
-        self._last_call = (name, params)   # 审批预览要拿它显示"将要写入什么"
         if name == "spawn_agent":
             self._close_group()
             block = SubagentBlock(fit(str(params.get("goal", "")), 48))
@@ -463,12 +469,15 @@ class AemeathApp(App):
             await container.mount(row)
             self._calls[tuid] = (call, row)
 
-    def _on_tool_finish(self, event: dict) -> None:
+    async def _on_tool_finish(self, event: dict, container: Widget, rule: str) -> None:
         tuid = event.get("tool_use_id", "")
         if tuid in self._spawns:
             return   # 子 agent 的收尾由它自己的 run.completed 处理
         found = self._calls.pop(tuid, None)
         if found is None:
+            # 没有配对的 start = 被闸门拦下的调用(权限拒绝 / 未知工具 / 缺参),它从没跑过。
+            # 现补一行"已结束"的行来显示 —— 拒绝必须留下痕迹,不能悄无声息。
+            await self._mount_blocked(event, container, rule)
             return
         call, holder = found
         call.output = str(event.get("content", ""))
@@ -476,6 +485,24 @@ class AemeathApp(App):
         call.is_error = bool(event.get("is_error"))
         call.finished = True
         holder._repaint()
+
+    async def _mount_blocked(self, event: dict, container: Widget, rule: str) -> None:
+        """渲染一次【没能开始】的工具调用。
+
+        走单独的 ToolRow(不并进只读折叠组):被拦下来是用户要知道的事,
+        不该混在"读了 22 个文件"那种摘要里被折起来。
+        """
+        name = str(event.get("tool_name", ""))
+        if not name:
+            return                     # 老 daemon 发的 finish 没带名字,认不出来就别乱画
+        self._demote_answer()          # 和 _on_tool_start 同样的定格,否则时序会显示成反的
+        self._close_group()
+        call = ToolCall(name=name, params=event.get("params") or {},
+                        started_at=str(event.get("ts", "")))
+        call.output = str(event.get("content", ""))
+        call.is_error = bool(event.get("is_error"))
+        call.finished = True
+        await container.mount(ToolRow(call, rule_char=rule))
 
     async def _on_run_completed(self, event: dict, container: Widget, rule: str) -> None:
         self._end_answer()
@@ -512,9 +539,10 @@ class AemeathApp(App):
         不需要 Content 光标、不需要面板焦点切换:出现时机由 agent 决定,不由导航决定。
         """
         future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-        name, params = self._last_call
-        if name != ask.get("tool_name"):        # 对不上就退回只显示 ask 自带的信息
-            name, params = ask.get("tool_name", ""), {"detail": ask.get("detail", "")}
+        name = str(ask.get("tool_name", ""))
+        # 参数直接从 ask 信封里拿。以前是去事件流里捞上一次 tool.start ——
+        # 现在 start 排在审批【之后】发,那条路已经断了,而且本来就不该那么绕。
+        params = ask.get("params") or {"detail": ask.get("detail", "")}
         self.approval.open(name, params)
         self._pending_perm = future
         self._set_state("ask")
