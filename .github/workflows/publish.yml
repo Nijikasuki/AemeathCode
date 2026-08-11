@@ -1,0 +1,44 @@
+name: Publish
+
+# 触发时机:推一个 v 开头的 tag(发版路的最后一步 git push --tags 就会触发)。
+# workflow_dispatch 是手动触发,用来验证配置对不对。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      # 关键的一行。它允许这个 job 向 GitHub 要一张 OIDC 身份凭证 ——
+      # Trusted Publishing 全靠它,PyPI 那边不存任何 token,只认这张现签的凭证。
+      # 少了这行,uv publish 拿不到凭证,PyPI 会直接拒绝。
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      # 发之前先跑测试。发出去的版本【不可撤回、不可覆盖】,
+      # 宁可在这里红,也不要把红的发到 PyPI 上。
+      - name: Run tests
+        run: |
+          uv sync
+          uv run pytest -q
+
+      - name: Build
+        run: uv build
+
+      # always = 强制走 OIDC。写 automatic 的话,拿不到凭证时它会静默退回去找
+      # token,配错了反而不容易发现 —— 这里要的就是配错就报错。
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always
