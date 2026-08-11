@@ -2,12 +2,36 @@
 name = "aemeathcode"
 version = "0.2.1"
 requires-python = ">=3.12"
+
+# 下面这几项只在 PyPI 页面上有用,但缺了页面就是空白的:
+# description = 包名底下那行简介;readme = 页面正文;keywords 参与站内搜索。
+description = "从零手搓的终端 Coding Agent:daemon + 多路复用协议 + ReAct 循环,纯 Python/asyncio 实现"
+readme = "README.md"
+authors = [{ name = "Nijikasuki" }]
+license = "MIT"
+keywords = ["agent", "coding-agent", "llm", "tui", "mcp", "react", "cli", "asyncio"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",   # 官方支持面 = Linux / macOS / WSL2,
+    "Operating System :: MacOS",            # 不列 Windows,和 README 的平台声明一致
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Code Generators",
+]
+
 dependencies = [
     "anthropic==0.120.2",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
     "textual>=8.2.8",
 ]
+
+# PyPI 页面右侧那排链接。没有这段,包页面上就没有任何入口回 GitHub。
+[project.urls]
+Homepage = "https://github.com/Nijikasuki/AemeathCode"
+Repository = "https://github.com/Nijikasuki/AemeathCode"
+Issues = "https://github.com/Nijikasuki/AemeathCode/issues"
 
 # 命令行入口:装包后生成 `aemeath` 命令,指向 cli/main.py 的 main()
 [project.scripts]

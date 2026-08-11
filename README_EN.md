@@ -1,181 +1,223 @@
 <div align="center">
 
-<img src="assets/mascot.gif" width="120" alt="AemeathCode mascot">
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/mascot.gif" width="120" alt="AemeathCode mascot">
 
 # AemeathCode
 
 **A coding agent built from scratch —— a working terminal AI agent, and a visible journey through systems engineering.**
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/Nijikasuki/AemeathCode/blob/main/LICENSE)
 [![Built with asyncio](https://img.shields.io/badge/built%20with-asyncio-blue)](https://docs.python.org/3/library/asyncio.html)
 [![TUI: Textual](https://img.shields.io/badge/TUI-Textual-5A5AFF)](https://textual.textualize.io/)
 [![MCP](https://img.shields.io/badge/MCP-client-orange)](https://modelcontextprotocol.io/)
 [![CI](https://github.com/Nijikasuki/AemeathCode/actions/workflows/ci.yml/badge.svg)](https://github.com/Nijikasuki/AemeathCode/actions/workflows/ci.yml)
 
-[简体中文](./README.md) · **English**
+[简体中文](https://github.com/Nijikasuki/AemeathCode/blob/main/README.md) · **English**
 
 </div>
 
-> AemeathCode reimplements the core mechanics of a terminal coding agent —— daemon process + multiplexed protocol + ReAct agent —— from the ground up in pure Python + asyncio. It's not a glue-together of libraries; it was pushed out layer by layer across eight stages (S0→S7): first processes that can talk, then a loop that can use tools, then memory, permissions, compaction, sub-agents, and MCP.
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/screenshot.png" width="100%" alt="The AemeathCode TUI executing a run">
 
-<div align="center"><img src="assets/screenshot.png" width="820" alt="AemeathCode TUI —— the agent reading code to hunt a bug"></div>
-
----
-
-## ✨ What it can do
-
-Give it a goal and it plans the steps, calls tools, observes results, and loops until the job is done —— all visible live in your terminal:
-
-- 🧠 **Autonomous plan + execute (ReAct loop)** —— goal → think → call tool → observe → think again, until it converges
-- 🛠️ **Actually does things** —— read/write files, run shell commands, list directories, maintain a task list
-- 💾 **Has memory** —— multi-step within a run, multi-turn within a session, resumable across sessions, plus long-term notes it writes itself
-- 🔐 **Asks before acting** —— dangerous operations (run command / write file) prompt for approval (once / always / deny), and it remembers
-- 🗜️ **Context won't overflow** —— when history nears the token budget it auto-compacts: old turns summarized, recent ones kept verbatim
-- 🤖 **Can spawn sub-agents** —— the main agent spawns sub-agents in isolated contexts for sub-tasks, and they can play different roles
-- 🔌 **Connects external tools (MCP)** —— acts as an MCP client to real GitHub / filesystem servers, using their tools as its own
+<sub>A run in progress: its thinking on the left, tool calls and the streaming answer in the middle, the task list it wrote for itself and the files it touched this round on the right.</sub>
 
 ---
 
-## 🚀 Quick start
+## What it is
 
-### 0. Platform support
+Give it a goal and it plans the steps, reads and writes files, runs commands, observes results, and keeps looping until the job is done —— all visible live in your terminal.
 
-| Platform | Status |
-|---|---|
-| Linux | ✅ Supported |
-| macOS | ✅ Supported |
-| Windows + WSL2 | ✅ Supported (**use this on Windows**) |
-| Windows native (PowerShell / CMD) | ❌ **Not supported** |
+It is two processes: a frontend and a resident background daemon, joined by a multiplexed protocol implemented here from scratch. The ReAct loop, tool registry, session memory, permission approval, context compaction, sub-agents and the MCP client are all pure Python + asyncio —— **no agent framework involved**.
 
-Native Windows isn't a porting gap — several core mechanisms are POSIX by design:
-the daemon takes SIGINT/SIGTERM through `add_signal_handler` (absent from the Windows
-event loop), `aemeath stop` shuts down via process-group signals, and the `bash` tool
-is written against a POSIX shell throughout.
+This is a learning and showcase project. It really executes shell commands and really writes files —— run it in a directory you trust (see [Security](#security)).
 
-On Windows, run it inside WSL2:
+---
 
-```powershell
-wsl --install          # admin PowerShell, then reboot
-```
+## Install and run
 
-Requires **Python 3.12+**.
-
-### 1. Install
-
-```bash
-# One command to install as a global command (recommended, just to use it)
-pipx install git+https://github.com/Nijikasuki/AemeathCode.git
-# or: uv tool install git+https://github.com/Nijikasuki/AemeathCode.git
-
-# To uninstall (note: use the PACKAGE name aemeathcode, not the command name aemeath)
-pipx uninstall aemeathcode
-```
+**Supported on Linux / macOS / Windows + WSL2. Native Windows does not work**, and there are no plans to port it.
 
 <details>
-<summary>Want the source / to develop? Clone and run with uv</summary>
+<summary>Why native Windows isn't supported</summary>
 
-```bash
-git clone https://github.com/Nijikasuki/AemeathCode.git
-cd AemeathCode
-uv sync
-# then prefix commands with uv run, e.g.: uv run aemeath
+It isn't a porting gap — several core mechanisms are POSIX by design:
+
+| Where | The problem on Windows |
+|---|---|
+| Daemon receiving SIGINT / SIGTERM | Uses `loop.add_signal_handler`, absent from the Windows event loop |
+| `aemeath stop` | Shuts down via process-group signals, which Windows has no equivalent of |
+| The `bash` tool | Written against a POSIX shell throughout; on `cmd.exe` the semantics change entirely |
+
+Forcing it to start would only produce a version full of holes, so it's explicitly unsupported. On Windows, install WSL2 and follow the steps below inside it:
+
+```powershell
+wsl --install          # admin PowerShell, then reboot; run everything in the WSL terminal afterwards
 ```
 </details>
 
-### 2. Configure
+### 1. Install uv
 
-**Nothing to do** — the first `aemeath` run opens a setup wizard asking for three
-things (API key, base URL, model name) and writes them to the global config. Run
-`aemeath init` any time to change them.
+The only prerequisite. uv is a single static binary — you don't need Python first, it downloads Python 3.12 itself.
 
-Config is read from two levels, **project overrides global**:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
-| Priority | Location | Purpose |
+> **`uv` won't work in the current terminal yet**: the installer edits your shell config, so reopen the terminal or run `source ~/.bashrc`.
+
+### 2. Install AemeathCode
+
+```bash
+uv tool install aemeathcode
+```
+
+> If uv warns that `~/.local/bin` isn't on your `PATH`, run `uv tool update-shell` once — **and reopen the terminal again**.
+>
+> Note the **command is `aemeath`, the package is `aemeathcode`**. Upgrade and uninstall use the package name:
+> `uv tool upgrade aemeathcode` / `uv tool uninstall aemeathcode`.
+>
+> Already have pipx? `pipx install aemeathcode` works just as well — no need to install uv for this.
+
+### 3. Run
+
+```bash
+aemeath
+```
+
+That's the whole thing. The first run opens a setup wizard asking for three values (API key, base URL, model name), then drops you into the UI.
+
+Underneath it's a two-process "background daemon + frontend" architecture, but you never manage it —— `aemeath` probes for the daemon, spawns it in the background if absent, then opens the UI (much like `docker`). The daemon stays resident so the next launch is instant; `aemeath stop` shuts it down.
+
+Works with any **Anthropic Messages API–compatible** endpoint: official, DeepSeek, your own gateway.
+
+---
+
+## How it works
+
+### The ReAct loop
+
+A run is a loop: send the conversation to the model → it either answers or says "call these tools" → execute them → feed the results back → send again → until it stops asking for tools.
+
+Simple in outline; the hard part is **pairing**. Every `tool_use` block the model emits must be answered by a matching `tool_result` block on the next turn — miss one, or get the order wrong, and the API rejects the whole conversation. A tool that crashed, got denied by permissions, or was called with missing arguments **still has to return a result**, just one whose content is the error. That rule is the least forgiving part of `agent/loop.py`.
+
+Eight built-in tool families: read file, write file, run shell, list directory, task CRUD, long-term notes, load a skill, spawn a sub-agent.
+
+### It asks before it acts
+
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/approval.png" width="100%" alt="Permission approval: a confirmation before writing a file, showing the full content to be written">
+
+Writing files and running commands are intercepted **before execution**, and the daemon asks the frontend for authorization **in reverse** —— same TCP connection, but where the client normally sends requests and the daemon replies, approvals flow the other way.
+
+Two deliberate choices:
+
+- **The approval panel shows the full content it intends to write**, not just a filename to blind-sign. The approval request carries the complete arguments itself; it doesn't scrape them from the event stream.
+- **Denied calls leave a trace.** Content draws a `× write_file / permission denied` line, while the Changes panel records nothing — because nothing ran. "This tool started executing" and "the model wanted to call it" are two different facts, and the event stream keeps them apart.
+
+Approve once, or approve always; "always" is remembered and won't ask again for the same kind of operation.
+
+### It remembers
+
+Memory has three scopes, each with its own job:
+
+| Scope | What it holds | How long it lives |
 |---|---|---|
-| 1 (highest) | Real shell environment variables | One-off override, e.g. `AEMEATH_PORT=8888 aemeath` |
-| 2 | `.aemeath/.env` in the current directory | Per-project (different model / key) |
-| 3 (fallback) | `~/.config/aemeath/.env` | Global: configure once, works anywhere |
+| Within a run | This round's thinking, tool calls and results | Until the run ends |
+| Within a session | Full multi-turn conversation history | On disk; `/resume` to pick it back up |
+| Across sessions | Long-term notes the agent writes via `note_save`, plus the project memory `AEMEATH.md` you write | Permanent |
 
-> Project config lives in `.aemeath/.env`, **not your project's own `.env`**. That is
-> deliberate: your `.env` usually holds `DATABASE_URL` and other secrets, and the agent
-> has a `bash` tool whose subprocesses inherit the environment — reading only our own
-> file keeps your secrets out of it. `.aemeath/` ships with a self-ignoring `.gitignore`.
+Messages are stored incrementally per run, with an index that stitches them into full history — so resuming rebuilds the conversation exactly, instead of loading one ever-growing file.
 
-**Want a different model / key for just one project?** Any of these three:
+### It compacts itself when context fills up
 
-```bash
-aemeath init --local            # 1. wizard writes .aemeath/.env (without --local it writes global)
-cp .env.example .aemeath/.env   # 2. copy the template and edit (every variable is listed there)
-                                # 3. or hand-write .aemeath/.env with only the lines you override
-```
+As history grows toward the token budget, compaction kicks in automatically: older turns go to **a separate auxiliary LLM call** to be summarized, while the most recent turns are **kept verbatim** (a verbatim tail is more faithful than summarizing everything — what the model just said shouldn't be paraphrased back at it).
 
-AemeathCode works with any **Anthropic Messages API–compatible** endpoint (official, DeepSeek, your own gateway, etc.).
+Compaction only touches the in-memory working copy; **the record on disk is left byte-for-byte intact**. So a resumed session still gets the full history.
 
-### 3. Launch
+### The capability boundary is extensible
 
-```bash
-aemeath          # just this —— auto-starts the daemon in the background and enters the TUI
-```
+- **Sub-agents** —— the main agent hands a sub-task to an isolated context; only the result comes back, and the intermediate steps never pollute the main conversation. Sub-agents can also take on different roles (profiles).
+- **Skills** —— on-demand playbooks. Only the **summary** sits in the system prompt permanently (so the model knows the skill exists); the body is loaded only when it actually calls `use_skill`, so dozens of skills still won't blow up the context.
+- **MCP** —— acts as a client to external servers (GitHub, filesystem, …) and registers their tools into **the same ToolRegistry**. From the model's side, an MCP tool and a built-in tool are indistinguishable.
 
-> 🧠 **One command does it all**: under the hood AemeathCode is a two-process "background daemon + frontend" architecture, but you don't manage it —— `aemeath` probes for the daemon, spawns it in the background if absent, then opens the UI (like `docker`). The daemon stays resident (instant next time); stop it with `aemeath stop`.
+See [`examples/`](https://github.com/Nijikasuki/AemeathCode/tree/main/examples) for how to write custom skills, project memory, and MCP config.
 
 ---
 
-## 📟 CLI commands
+## S0 → S7: how it grew
 
-> `run` / `chat` / `watch` / `tui` all ensure the daemon is running before connecting (spawning it if needed) —— no need to start `core` manually.
+This wasn't written in one pass — it was **pushed out layer by layer across eight stages**, each solving one concrete engineering problem. The table doubles as a roadmap for building an agent from scratch:
 
-| Command | What it does |
-|---|---|
-| `aemeath` | Enter the TUI (same as `aemeath tui`; auto-starts the daemon) |
-| `aemeath init` | Re-run the setup wizard, writing global config (restarts a running daemon so it takes effect) |
-| `aemeath init --local` | Same, but writes this project's `.aemeath/.env` |
-| `aemeath run "<goal>"` | One-shot: create a single-turn session, run once, exit |
-| `aemeath chat` | Multi-turn: a REPL reusing one session |
-| `aemeath stop` | Shut down the resident background daemon |
-| `aemeath watch` | Observer: watch the event stream of all running runs |
-| `aemeath trace` | Print the timeline of the latest run (LLM / tool timing summary) |
-| `aemeath ping` | Health check: is the daemon up (does not auto-spawn) |
-| `aemeath core` | Start the daemon in the foreground manually (to see its logs; usually unneeded) |
-| `aemeath mcp add <name> <command...>` | Register an MCP server (connected on next daemon start) |
+| Stage | Engineering problem | Key mechanisms |
+|---|---|---|
+| **S0** | How can two processes communicate reliably | Daemon, TCP framing, NDJSON, JSON-RPC 2.0, asyncio concurrency, graceful shutdown |
+| **S1** | How to make it use tools on its own | ReAct loop, tool registry, domain types / anti-corruption layer, pub/sub events, dependency injection |
+| **S2** | How one link carries both requests and an event stream | Multiplexing, Future-based request/response pairing, background jobs, pub/sub-over-network, state/logic separation |
+| **S3** | From read-only observer to writing, running, planning | Async subprocesses, path safety, task system, trace observability, decorator/wrapper pattern |
+| **S4** | How to remember across turns and sessions | Three memory scopes, incremental storage + index, pointer model, the tool_use/tool_result pairing rule, process-group signals |
+| **S5** | How to intercept dangerous operations before they happen | Reverse RPC (daemon asks the client), tri-state policy, remembered approvals, fail-closed, polymorphism over conditionals |
+| **S6** | What to do when context fills up | Token budget checks, auto-compaction, auxiliary LLM channel, working copy vs. persistent copy |
+| **S7** | How to extend the capability boundary | Sub-agents (isolated context), agent profiles, on-demand skills, MCP client (stdio JSON-RPC handshake) |
+
+The matching git tags are `stage-0` … `stage-7` — check them out in order to read the source the way it was written.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
-AemeathCode splits "frontend" and "brain" into two processes, connected by a single **TCP + NDJSON + JSON-RPC 2.0** multiplexed link. Three kinds of traffic share that one link: the client's **request/response**, the daemon's pushed **event stream**, and the daemon's **reverse ask/reply** to the client during approvals.
+### Two processes, one connection
+
+The interface and the brain are separate processes, joined by exactly **one** TCP connection — not a port per concern, but three very different kinds of traffic sharing a single wire.
 
 ```mermaid
-flowchart TB
-    subgraph FE["Frontend process (where you interact)"]
-        CLI["CLI<br/>run / chat / watch / trace"]
-        TUI["TUI workbench<br/>Textual"]
-    end
+flowchart LR
+    FE["Frontend process<br/>TUI · Textual<br/>CLI · run / chat / watch"]
+    LINK["One TCP connection<br/>NDJSON framing<br/>JSON-RPC 2.0, multiplexed"]
+    BE["daemon process · aemeath core<br/>Runner · AgentLoop · tools<br/>permissions · compaction · sessions · trace"]
+    MCPS["External MCP server<br/>GitHub · filesystem · …"]
 
-    LINK{{"TCP + NDJSON + JSON-RPC 2.0<br/>multiplexed: request/response · event stream · reverse approval"}}
+    FE <--> LINK
+    LINK <--> BE
+    BE <-->|"stdio JSON-RPC"| MCPS
 
-    subgraph BE["daemon process —— aemeath core"]
-        RUNNER["Runner<br/>background job scheduling"]
-        LOOP["Agent · ReAct loop<br/>think→tool→observe→loop"]
-        TOOLS["Tools<br/>read/write/bash/list/task/note/skill/spawn"]
-        SVC["Runtime services<br/>EventBus · permissions · compaction<br/>sessions/memory · trace · MCP client"]
-        PROV["LLMProvider<br/>Anthropic-compatible endpoint"]
-    end
-
-    MCP["External MCP server<br/>(GitHub / filesystem / …)"]
-
-    CLI <--> LINK
-    TUI <--> LINK
-    LINK <--> RUNNER
-    RUNNER --> LOOP
-    LOOP --> TOOLS
-    LOOP --> PROV
-    LOOP -.-> SVC
-    TOOLS <-.stdio JSON-RPC.-> MCP
+    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
+    classDef wire fill:none,stroke:#d98cb3,stroke-width:2px
+    class FE,BE,MCPS box
+    class LINK wire
 ```
 
-**Core modules** (source in `src/aemeathcode/`):
+The three kinds of traffic on that wire:
+
+| Traffic | Direction | When |
+|---|---|---|
+| Request / response | frontend → daemon → frontend | Start a run, list sessions, query token usage |
+| Event stream | daemon → frontend (one-way push) | Model streaming tokens, tool start / finish, compaction fired |
+| Reverse approval | daemon → frontend → daemon | About to write a file or run a command — stops and waits for your yes |
+
+The third one is the least intuitive part of the design: **the direction flips**, the daemon becomes the asker and the frontend the responder. Yet it shares the same connection, the same envelope format and the same read loop as the other two — distinguished by envelope type, not by opening a second wire.
+
+### Where a run goes inside the daemon
+
+```mermaid
+flowchart LR
+    IN(["run request"]) --> RUNNER["Runner<br/>create a background job"]
+    RUNNER --> LOOP["AgentLoop<br/>ReAct loop"]
+    LOOP -->|"messages"| PROV["LLMProvider<br/>Anthropic-compatible endpoint"]
+    PROV -->|"tool_use"| LOOP
+    LOOP -->|"execute"| TOOLS["ToolRegistry<br/>8 built-in families + MCP tools"]
+    TOOLS -->|"tool_result"| LOOP
+    LOOP -.->|"passes through every step"| SVC["permissions · compaction<br/>session memory · trace · EventBus"]
+
+    classDef box fill:none,stroke:#8b93a7,stroke-width:1.5px
+    classDef hot fill:none,stroke:#d98cb3,stroke-width:2px
+    classDef side fill:none,stroke:#8b93a7,stroke-width:1px,stroke-dasharray:4 4
+    class IN,RUNNER,PROV,TOOLS box
+    class LOOP hot
+    class SVC side
+```
+
+The two back-edges *are* the loop: `tool_use` returning from the model, `tool_result` returning from the tools. There is exactly one exit condition — the model stopped asking for tools.
+
+Source lives in `src/aemeathcode/`:
 
 | Layer | Location | Responsibility |
 |---|---|---|
@@ -188,59 +230,91 @@ flowchart TB
 
 ---
 
-## 📚 Learning journey: S0 → S7
+## Reference
 
-The defining feature of this project is that **it was pushed out layer by layer**, each stage solving one concrete engineering problem. The table itself is a roadmap for "how to build an agent from scratch":
+<details>
+<summary><b>CLI commands</b></summary>
 
-| Stage | Engineering problem | Key mechanisms |
+`run` / `chat` / `watch` / `tui` all ensure the daemon is running before connecting (spawning it if needed) —— no need to start `core` by hand.
+
+| Command | What it does |
+|---|---|
+| `aemeath` | Enter the TUI workbench (same as `aemeath tui`) |
+| `aemeath run "<goal>"` | One-shot: create a single-turn session, run once, exit |
+| `aemeath chat` | Multi-turn: a REPL reusing one session |
+| `aemeath stop` | Shut down the resident background daemon |
+| `aemeath init` | Re-run the setup wizard, writing global config (restarts a running daemon so it takes effect) |
+| `aemeath init --local` | Same, but writes this project's `.aemeath/.env` |
+| `aemeath watch` | Observer: watch the event stream of every running run |
+| `aemeath trace` | Print the timeline of the latest run (LLM / tool timing summary) |
+| `aemeath ping` | Health check: is the daemon up (does not auto-spawn) |
+| `aemeath core` | Start the daemon in the foreground (to read its logs; usually unneeded) |
+| `aemeath mcp add <name> <command...>` | Register an MCP server (connected on the next daemon start) |
+
+Keys inside the TUI: `^↑`/`^↓` switch session · `^u`/`^d` scroll content · `^j`/`^k` scroll thinking · `^y` copy the last answer · `^r` copy all content · `^q` quit. Slash commands: `/resume` `/clear` `/usage` `/mcp` `/about` `/help`.
+
+</details>
+
+<details>
+<summary><b>Configuration: change model, change key, override per project</b></summary>
+
+Usually nothing to do — the first-run wizard already wrote your global config. Run `aemeath init` any time to change it.
+
+Config is read from three levels, **higher overrides lower**:
+
+| Priority | Location | Purpose |
 |---|---|---|
-| **S0** | How can two processes communicate reliably | Daemon, TCP packet framing, NDJSON, JSON-RPC 2.0, asyncio concurrency, graceful shutdown |
-| **S1** | How to make it use tools on its own | ReAct loop, tool registry, domain types / anti-corruption layer, pub/sub events, dependency injection |
-| **S2** | How one link carries both requests and an event stream | Multiplexing, Future request/response pairing, background jobs, pub/sub-over-network, state/logic separation |
-| **S3** | From read-only observer to writing, running, planning | Async subprocess, path safety, task system, trace observability, decorator/wrapper pattern |
-| **S4** | How to remember across turns / sessions | Three memory scopes, incremental storage + index, pointer model, tool_use/tool_result pairing rule, process-group signals |
-| **S5** | How to intercept dangerous operations before they happen | Reverse RPC (daemon asks client), tri-state policy, remembered approvals, fail-closed, polymorphism over conditionals |
-| **S6** | What to do when context fills up | Token budget check, auto-compaction (summarize old turns + keep the tail verbatim), auxiliary LLM channel, working/persistent copy split |
-| **S7** | How to extend the capability boundary | Sub-agents (isolated context), agent profiles/roles, on-demand skills, **MCP client** (stdio JSON-RPC handshake) |
+| 1 (highest) | Real shell environment variables | One-off override, e.g. `AEMEATH_PORT=8888 aemeath` |
+| 2 | `.aemeath/.env` in the current directory | Per-project (different model / key) |
+| 3 (fallback) | `~/.config/aemeath/.env` | Global: configure once, works anywhere |
 
----
-
-## 🧪 Tests
+To change the model or key for one project only, take your pick:
 
 ```bash
-uv run pytest -q
+aemeath init --local            # 1. wizard writes .aemeath/.env (without --local it writes global)
+cp .env.example .aemeath/.env   # 2. copy the template and edit (every variable is listed there)
+                                # 3. or hand-write .aemeath/.env with only the lines you override
 ```
 
-Covers framing / registry / policy / invocation / broadcaster / EventBus / skills / profiles / context / ReAct loop / budget / MCPTool / task / note / session, plus one MCP end-to-end integration test.
+> Project config lives in `.aemeath/.env`, **not your project's own `.env`**. That is deliberate: your `.env` usually holds `DATABASE_URL` and other secrets, and the agent has a `bash` tool whose subprocesses inherit the environment — reading only our own file keeps your secrets out of it. `.aemeath/` ships with a self-ignoring `.gitignore`.
+
+</details>
+
+<details>
+<summary><b>Reading the source / developing</b></summary>
+
+```bash
+git clone https://github.com/Nijikasuki/AemeathCode.git
+cd AemeathCode
+uv sync
+uv run aemeath        # prefix commands with uv run
+uv run pytest -q      # 114 passed
+```
+
+Tests cover framing / registry / policy / invocation / broadcaster / EventBus / skills / profiles / context / ReAct loop / budget / MCPTool / task / note / session, plus one MCP end-to-end integration test.
+
+</details>
 
 ---
 
-## 🛡️ Security notice
+## Security
 
-AemeathCode is an agent that can **really execute shell commands and read/write local files**. Although it has built-in permission approval (asking before dangerous operations), please:
+AemeathCode **really executes shell commands and reads/writes local files**. Permission approval is built in, but please:
 
-- Run it in a trusted, isolated environment (container / sandbox / dedicated directory); don't point it at important data;
-- Read commands carefully before approving —— `allow_always` is remembered, so don't wave through dangerous ones;
-- Keep secrets in `.aemeath/.env` or `~/.config/aemeath/.env` (the former self-ignores); never commit them.
+- Run it in a trusted, isolated environment (container / sandbox / dedicated directory); don't point it at data that matters;
+- Read the command before approving —— `allow_always` is remembered, so don't wave dangerous ones through;
+- Keep your API key in `.aemeath/.env` or `~/.config/aemeath/.env` (the former self-ignores); never commit it.
 
 This project is for learning and research only; users are responsible for its behavior.
 
----
+## License
 
-## 🤝 Contributing
+[MIT](https://github.com/Nijikasuki/AemeathCode/blob/main/LICENSE) © 2026 Nijikasuki
 
-This is a learning / showcase project; issues discussing implementation ideas are welcome. If you'd like to build an agent from scratch too, read the source in S0→S7 order.
-
-## 📄 License
-
-[MIT](./LICENSE) © 2026 Nijikasuki
-
-## 🙏 Acknowledgements
-
-The staged design was inspired by KamaClaude.
+The staged design was inspired by KamaClaude. Issues discussing implementation details are welcome.
 
 <div align="center">
 <br>
-<img src="assets/footer.gif" width="200" alt="AemeathCode">
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/footer.gif" width="200" alt="AemeathCode">
 <br><br>
 </div>
