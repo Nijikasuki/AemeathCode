@@ -80,6 +80,8 @@ COMMANDS = ["/resume", "/clear", "/usage", "/mcp", "/about", "/help", "/exit"]
 # identity 决策 3 原文是"≤1 帧"—— 但实测 60ms 作用在角落一个三字标签上,人眼来不及,
 # 等于没做。130ms 仍然只是"闪一下"、不构成动画,但确实看得见。
 SHEEN_STEP = 0.08     # logo 流光的帧间隔(~12fps),只在空态跑
+# /about 的字符画是 90 列;窄于「画 + 间隔 + 文字栏」就不画,裁掉半张脸不如没有。
+ABOUT_ART_MIN_WIDTH = 139
 HINTS = ("^↑/^↓ 选会话 · ^u/^d 滚动 · ^j/^k thinking · "
          "^y 复制回答 · ^r 复制全部 · ^q 退出")
 
@@ -655,22 +657,53 @@ class AemeathApp(App):
     async def _show_about(self) -> None:
         """`/about` —— 全项目唯一出现她的地方(identity 决策 4:只在显式召唤下现形)。
 
-        只有 wordmark + 版本 / model / session / context。**没有角色形象** ——
-        三次实测都糊到"远看勉强认得出",见 identity.md 已定问题 4。
+        字符画 + wordmark + 版本 / model / session / context。
+
+        **为什么字符画只放这里**:tui.md §4 避免清单有「巨大的常驻 ASCII Banner」。
+        `/about` 是显式命令、印完就随内容滚走,不常驻,所以不撞那一条 ——
+        这也正是 identity 决策 4 原本的口径。
+
+        **横排,不是竖排。**竖着摞的时候装饰占满前 46 行,把 model/session/context
+        顶到屏幕外 —— 那正好违反 tui.md §3「信息层级 > … > 装饰」。横排之后信息
+        和画并列在第一屏,而且两块有了共同的上边基准(竖排时画自带约 25 列前导空格,
+        和左对齐的文字块没有共同基准,读起来是飘着的两坨)。
+
+        窄终端(Content 可用宽 < ABOUT_ART_MIN_WIDTH)不画,退回纯文字。
         """
         view = self._view
         anchor = view.virtual_size.height     # 记住 about 块的起点,末尾滚回这里
-        await self._mount(view, Static(splash.Wordmark(), classes="about"))
-        rows = [
+        # 窄了就不画 —— 90 列的画塞进更窄的栏只会被裁掉半张脸,不如没有。
+        # 阈值 = 画 90 + 间隔 2 + 文字栏 47(那行中文描述的显示格宽)。
+        wide = view.size.width >= ABOUT_ART_MIN_WIDTH
+
+        col: Widget = view
+        if wide:
+            row = Horizontal(classes="about-row")
+            await self._mount(view, row)
+            await self._mount(row, Static(splash.portrait(), classes="about-art"))
+            # 多包一层 slot 只为垂直居中:Textual 的 align 把所有子元素当**一个整体**
+            # 对齐,两个孩子高度不同时它不会单独挪矮的那个(实测 `.about-row{align:
+            # left middle}` 完全无效)。所以让 slot 撑满整行高,再由它把 auto 高的
+            # 文字块居中。
+            slot = Vertical(classes="about-slot")
+            await self._mount(row, slot)
+            col = Vertical(classes="about-col")
+            await self._mount(slot, col)
+
+        await self._mount(col, Static(splash.Wordmark(), classes="about"))
+        # 走 Static 而不是 EventRow:EventRow 会画台账竖线,那条线的用途是让工具行
+        # 和对话流对齐成一条基线。/about 是一块独立的标识,不参与那条基线。
+        info = Text()
+        for content, style in (
             (f"AemeathCode  {splash.VERSION}", ""),
             ("一个轻量、可观察、可修改的 Coding Agent Runtime", "dim"),
             ("", ""),
             (f"model      {self._model}", "dim"),
             (f"session    {(self._session_id or '')[:8]}", "dim"),
             (f"context    {self._ctx_used} / {self._window}", "dim"),
-        ]
-        for content, style in rows:
-            await self._mount(view, EventRow("", Text(content, style=style)))
+        ):
+            info.append(content + "\n", style=style)
+        await self._mount(col, Static(info, classes="about-info"))
         self.call_after_refresh(lambda: view.scroll_to(y=anchor, animate=False))
 
     def _reset_run_state(self) -> None:

@@ -31,6 +31,10 @@ TEXT      = "#E4E1EC"
 PINK = "#FF9ED8"
 CYAN = "#7DE8E8"
 IRIS = "#9B8CFF"
+# 字符画专用的暗一档的粉。**不是新增一种品牌色**,是同一个粉压低明度 ——
+# 字符画是整块 40x90 的色面,用满亮度的 PINK 会盖过旁边的 wordmark 和元信息,
+# 让最该被读到的 model/session/context 输给装饰。
+PINK_MUTED = "#C97FA8"
 
 MOTION = PINK           # 正在动的东西:流式游标、running、`›` 提示符
 
@@ -98,6 +102,7 @@ S_STRUCT  = _c(MUTED)            # 藏青:gutter 竖线、结构线 —— 静�
 S_LABEL   = _c(MUTED)            # 冷青偏白:工具名、字段标签
 S_GLOW    = _c(MUTED)      # 曾经的"辅助光",现在退回中性 —— 它不承载语义            # 冷青微光:极弱的辅助,用得很省
 S_MOTION  = _c(PINK)               # 粉 = 正在动
+S_PORTRAIT = _c(PINK_MUTED)        # /about 的字符画 —— 见下面那条豁免说明
 S_ERROR   = _c("#E07A88", "bold")
 S_WARN    = _c("#D4B26B", "bold")
 S_ADD     = _c("#7FB093")  # diff 的 +,低饱和绿,不抢戏            # diff 的 + —— 唯一一处在错误之外用语义色
@@ -157,5 +162,27 @@ Screen { background: $background; }
 .answer.-narration { color: $text-muted; }
 .user   { padding: 1 0 0 0; color: $text; text-style: bold; height: auto; }
 .gap    { height: 1; }
-.about  { height: auto; padding: 1 0 0 2; }
+/* width:auto 是给 .about-col 的自动宽用的,原因见下面那段 */
+.about  { height: auto; width: auto; padding: 1 0 0 2; }
+
+/* /about 的横排:左边字符画,右边一个带框的标识块。
+   竖着摞会让 46 行装饰把 model/session/context 顶出屏幕 —— 违反决策优先级
+   「信息层级 > … > 装饰」。
+
+   **不加边框。**试过带框的版本 —— 一个 55x45 的空框里只有十几行字,大片留白
+   反而把注意力拉到框本身,而且 tui.md §4 的避免清单里就有「过多边框」。
+   文字块靠**位置**(对着画的中线)成立,不靠框。
+
+   `.about-slot` 撑满行高,由它把 auto 高的 `.about-col` 垂直居中。多这一层是
+   因为 Textual 的 align 把子元素当整体对齐,不会单独挪矮的那个 ——
+   实测 `.about-row{align: left middle}` 完全无效。
+
+   `width: auto` 必须**同时**标在容器和它的子元素上(所以上面 .about 也有一份)。
+   只标容器的话它会塌成 8 列 —— Textual 的 auto 宽是问子元素要的,而 Static
+   包着 Rich renderable 时默认不报宽。 */
+.about-row  { height: auto; width: 1fr; }
+.about-art  { height: auto; width: auto; padding: 1 2 0 2; }
+.about-slot { height: 100%; width: auto; align-vertical: middle; }
+.about-col  { height: auto; width: auto; padding: 0 2 0 2; }
+.about-info { height: auto; width: auto; padding: 0 0 0 2; }
 """

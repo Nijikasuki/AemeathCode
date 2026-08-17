@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import random
+from importlib import resources
 from importlib.metadata import PackageNotFoundError, version
 
 from rich.cells import cell_len
@@ -24,6 +25,7 @@ from aemeathcode.tui.theme import (
     MOTION_HEX,
     S_LABEL,
     S_MOTION,
+    S_PORTRAIT,
     S_STRUCT,
     STRUCT_HEX,
     _lerp,
@@ -45,11 +47,16 @@ WORDMARK_SMALL = (
 )
 
 def _version() -> str:
-    """从包元数据读,不在源码里再写一遍 —— 两处硬编码迟早对不上。"""
+    """从包元数据读,不在源码里再写一遍 —— 两处硬编码迟早对不上。
+
+    兜底值**不写版本号**。上一版兜底写的是 "v0.2.0",而包早已到 0.2.1 ——
+    正好演示了这条 docstring 说的事:只要源码里还留着第二个版本号,它就会漂。
+    没装包时显示 "dev" 比显示一个过期的数字诚实。
+    """
     try:
         return "v" + version("aemeathcode")
     except PackageNotFoundError:      # 没安装(直接跑源码)时的兜底
-        return "v0.2.0"
+        return "dev"
 
 
 VERSION = _version()
@@ -300,3 +307,28 @@ def make(name: str = "full", phase: float | None = None):
         return cls(phase)
     except TypeError:          # Horizon / Core 不吃 phase
         return cls()
+
+
+# ---- 角色字符画(只在 /about 现形,不常驻) --------------------------------
+# 存在包目录 `art/` 而不是仓库根的 `assets/`:pyproject 的 sdist 明确
+# `exclude = ["assets", "docs"]`,放那儿的话源码分发装出来根本没有这个文件。
+#
+# 素材来源记在这里,因为**成品是不可逆的**:`assets/mascot.gif` 的第 6 帧
+# (8 帧里嘴张得最开的一帧),90 列,6 级 ramp " .-+#@"。想换帧/换尺寸只能重新生成。
+
+PORTRAIT_FILE = "portrait.txt"
+
+
+def portrait() -> Text:
+    """载入打包进来的字符画。
+
+    `no_wrap` 是硬要求,不是优化:**字符画每一行的长度就是构图本身**,
+    一旦折行整幅画立刻散架。终端窄的时候宁可把右边裁掉,也不能让它换行。
+
+    **用粉是对 theme.py「粉 = 正在动,静止界面不出现粉」那条的一次明确豁免。**
+    豁免的依据是它和 wordmark 同类:两者都是**品牌标识**,不是 runtime 状态。
+    用的是压暗一档的 `S_PORTRAIT` 而不是满亮度的 `S_MOTION` —— 40x90 的整块色面
+    用满亮度会盖过旁边的元信息。别照着这里推广到别处,状态类元素仍守那条规则。
+    """
+    raw = (resources.files("aemeathcode.tui") / "art" / PORTRAIT_FILE).read_text("utf-8")
+    return Text(raw.rstrip("\n"), style=S_PORTRAIT, no_wrap=True, overflow="crop")
