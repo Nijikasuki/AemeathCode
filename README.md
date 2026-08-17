@@ -70,6 +70,12 @@ uv tool install aemeathcode && aemeath
 - 命令名 `aemeath`,包名 `aemeathcode` —— 升级卸载用包名:`uv tool upgrade aemeathcode` / `uv tool uninstall aemeathcode`
 - 退出界面后 daemon 仍在后台常驻(下次秒进),`aemeath stop` 关掉
 
+### 显示 harness 概况
+
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/about.png" width="100%" alt="/about:版本、模型、会话 ID 与上下文占用">
+
+<sub>`/about` —— 版本、模型、会话 ID、上下文占用。</sub>
+
 ---
 
 ## 它怎么工作

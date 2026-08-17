@@ -70,6 +70,12 @@ Checks for uv, installs it if missing, then installs AemeathCode and launches it
 - Command is `aemeath`, package is `aemeathcode` — upgrade and uninstall use the package name: `uv tool upgrade aemeathcode` / `uv tool uninstall aemeathcode`
 - Quitting the UI leaves the daemon resident (next launch is instant); `aemeath stop` shuts it down
 
+### Harness overview
+
+<img src="https://raw.githubusercontent.com/Nijikasuki/AemeathCode/main/assets/about.png" width="100%" alt="/about: version, model, session id and context usage">
+
+<sub>`/about` —— version, model, session id, context usage.</sub>
+
 ---
 
 ## How it works
