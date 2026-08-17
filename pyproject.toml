@@ -1,6 +1,6 @@
 [project]
 name = "aemeathcode"
-version = "0.2.2"
+version = "0.2.3"
 requires-python = ">=3.12"
 
 # 下面这几项只在 PyPI 页面上有用,但缺了页面就是空白的:
