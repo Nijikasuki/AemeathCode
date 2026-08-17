@@ -162,8 +162,8 @@ Screen { background: $background; }
 .answer.-narration { color: $text-muted; }
 .user   { padding: 1 0 0 0; color: $text; text-style: bold; height: auto; }
 .gap    { height: 1; }
-/* width:auto 是给 .about-col 的自动宽用的,原因见下面那段 */
-.about  { height: auto; width: auto; padding: 1 0 0 2; }
+/* width 跟着 .about-col 走(弹性),原因见下面 /about 那段 */
+.about  { height: auto; width: 1fr; padding: 1 0 0 2; }
 
 /* /about 的横排:左边字符画,右边一个带框的标识块。
    竖着摞会让 46 行装饰把 model/session/context 顶出屏幕 —— 违反决策优先级
@@ -177,12 +177,14 @@ Screen { background: $background; }
    因为 Textual 的 align 把子元素当整体对齐,不会单独挪矮的那个 ——
    实测 `.about-row{align: left middle}` 完全无效。
 
-   `width: auto` 必须**同时**标在容器和它的子元素上(所以上面 .about 也有一份)。
-   只标容器的话它会塌成 8 列 —— Textual 的 auto 宽是问子元素要的,而 Static
-   包着 Rich renderable 时默认不报宽。 */
+   **文字栏是 `1fr` 弹性宽,不是 `auto`。**这条踩过坑:`auto` 时它死要 53 列
+   (那行中文描述 47 格 + padding),画 93 + 文字 53 = 146,终端窄于 214 列
+   右边就被**裁掉**几个字 —— 而裁切是静默的,不报错也不折行。改成 `1fr` 之后
+   它用剩下的空间,不够就折行,信息一个字都不丢。画本身仍是 `auto`(固定 90 列,
+   折行等于散架,所以宁可整幅不显示,由 ABOUT_ART_MIN_WIDTH 兜底)。 */
 .about-row  { height: auto; width: 1fr; }
 .about-art  { height: auto; width: auto; padding: 1 2 0 2; }
-.about-slot { height: 100%; width: auto; align-vertical: middle; }
-.about-col  { height: auto; width: auto; padding: 0 2 0 2; }
-.about-info { height: auto; width: auto; padding: 0 0 0 2; }
+.about-slot { height: 100%; width: 1fr; align-vertical: middle; }
+.about-col  { height: auto; width: 1fr; padding: 0 2 0 2; }
+.about-info { height: auto; width: 1fr; padding: 0 0 0 2; }
 """

@@ -83,3 +83,41 @@ async def test_about_drops_art_when_narrow() -> None:
     r = await _about_regions(150, 60)
     assert ".about-art" not in r
     assert ".about-slot" not in r, "没画的时候不该有横排的壳"
+
+
+async def _rendered_text(width: int, height: int = 60) -> str:
+    """把整屏渲染成纯文本(经 SVG 快照),用来检查有没有被静默裁掉的内容。"""
+    import re
+
+    from aemeathcode.tui.app import AemeathApp
+
+    app = AemeathApp()
+    async with app.run_test(size=(width, height)) as pilot:
+        await pilot.pause()
+        app._model, app._session_id, app._window = "deepseek-v4-flash", "709407b0", 1000000
+        await app._show_about()
+        await pilot.pause()
+        return "".join(re.findall(r">([^<>]*)</text>", app.export_screenshot()))
+
+
+async def test_about_text_is_never_clipped() -> None:
+    """元信息**一个字都不能被裁掉**。
+
+    这条守的是一个真出过的 bug:文字栏原本是 `width: auto`,死要 53 列,
+    终端窄于 214 列时右边就被容器边界**静默裁掉**几个字 —— 不报错、不折行、
+    几何断言也查不出来(widget 报的是请求尺寸,不是可见范围)。
+    改成 `1fr` 之后它会折行而不是丢字。
+
+    只测阈值刚过线那一档 —— 画还在、空间最紧,那里最容易翻车。
+    """
+    from aemeathcode.tui.app import ABOUT_ART_MIN_WIDTH
+
+    # content-body 宽 = 终端列数 - 72(两侧栏 66 + #content 边框与 padding 4
+    # + #content-body 自己的 padding 2)。+72 正好落在阈值上,画一定在。
+    cols = ABOUT_ART_MIN_WIDTH + 72
+    regions = await _about_regions(cols, 60)
+    assert ".about-art" in regions, f"{cols} 列下画应该还在,否则这条测试测了个寂寞"
+
+    text = await _rendered_text(cols)
+    for word in ("Runtime", "Agent", "Coding", "deepseek-v4-flash", "1000000"):
+        assert word in text, f"{word!r} 被裁掉了"
