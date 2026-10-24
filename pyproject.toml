@@ -47,9 +47,10 @@ build-backend = "hatchling.build"
 packages = ["src/aemeathcode"]
 
 # sdist 默认会把仓库里没被 .gitignore 的文件全打进去 —— assets/ 的 GIF 有 4.3MB、
-# docs/ 里是设计截图,都是 GitHub 上的门面/工作材料,装包的人一个字节都用不到。排掉。
+# docs/ 里是设计截图;website/ 是项目网站(含 node_modules,不排掉 sdist 会从 150KB 涨到 10MB)。
+# 都是 GitHub 上的门面/工作材料,装包的人一个字节都用不到。排掉。
 [tool.hatch.build.targets.sdist]
-exclude = ["assets", "docs"]
+exclude = ["assets", "docs", "website"]
 
 [dependency-groups]
 dev = [

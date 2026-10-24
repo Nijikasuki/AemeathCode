@@ -1,0 +1,55 @@
+name: Docs
+
+# 构建 website/(VitePress)并发布到 GitHub Pages:https://nijikasuki.github.io/AemeathCode/
+# 触发时机:main 上 website/ 有改动,或手动触发。改 Python 代码不会重建网站。
+# 前置(只需一次):仓库 Settings → Pages → Source 选「GitHub Actions」。
+on:
+  push:
+    branches: [main]
+    paths: ["website/**", ".github/workflows/docs.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write      # 往 Pages 发布
+  id-token: write   # Pages 部署用 OIDC 验明身份,和 publish.yml 一样不存 token
+
+# 同时只跑一次部署;新的推送到了,不取消正在进行的那次,排队等它发完
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - uses: actions/configure-pages@v5
+
+      # npm ci 严格按 package-lock.json 装,和本地一模一样
+      - run: npm ci
+      - run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

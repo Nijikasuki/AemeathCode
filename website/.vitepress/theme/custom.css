@@ -1,0 +1,60 @@
+/* 品牌色取自 TUI 的 theme.py:PINK #FF9ED8 / CYAN #7DE8E8 / IRIS #9B8CFF。
+   浅色模式下满亮度的粉在白底上读不清,所以用同一色相压深的版本;
+   深色模式直接用 TUI 原色。 */
+
+:root {
+  --ah-pink-strong: #C93F8C;
+  --ah-iris: #7B6BF0;
+  --ah-cyan: #2BA8A8;
+  --ah-grid: rgba(123, 107, 240, 0.07);
+
+  --vp-c-brand-1: #C93F8C;
+  --vp-c-brand-2: #B5357D;
+  --vp-c-brand-3: #C93F8C;
+  --vp-c-brand-soft: rgba(201, 63, 140, 0.12);
+
+  --vp-c-bg-alt: #F8F7FC;
+  --vp-home-hero-name-color: transparent;
+}
+
+.dark {
+  --ah-pink-strong: #FF9ED8;
+  --ah-iris: #9B8CFF;
+  --ah-cyan: #7DE8E8;
+  --ah-grid: rgba(155, 140, 255, 0.08);
+
+  --vp-c-bg: #0E0D14;
+  --vp-c-bg-alt: #15141D;
+  --vp-c-bg-elv: #15141D;
+  --vp-c-bg-soft: #1B1A26;
+
+  --vp-c-brand-1: #FF9ED8;
+  --vp-c-brand-2: #F7A8E0;
+  --vp-c-brand-3: #C97FA8;
+  --vp-c-brand-soft: rgba(255, 158, 216, 0.14);
+}
+
+/* 深色下主按钮上的字用深色,粉底白字对比度不够 */
+
+/* 特性卡片:hover 时顶部出一条粉 → 青 → 紫的色带,和 TUI 的 logo 渐变同源 */
+.VPFeature {
+  position: relative; overflow: hidden;
+  transition: border-color .25s, transform .25s;
+}
+.VPFeature::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  background: linear-gradient(90deg, #FF9ED8, #7DE8E8, #9B8CFF);
+  opacity: 0; transition: opacity .25s;
+}
+.VPFeature:hover { border-color: var(--vp-c-brand-1); transform: translateY(-2px); }
+.VPFeature:hover::before { opacity: 1; }
+
+/* 文档页里的提示框跟着品牌色 */
+.custom-block.tip { border-color: var(--ah-cyan); }
+
+/* 品牌主按钮上的字:浅色模式粉底白字,深色模式粉底深字(浅粉配白字对比度不够) */
+:root { --ah-on-brand: #fff; }
+.dark { --ah-on-brand: #0E0D14; }
+
+/* 顶栏 logo:终端徽章 ›_(public/logo.svg),站名用等宽字配它 */
+.VPNavBarTitle .title { font-family: var(--vp-font-family-mono); letter-spacing: -0.02em; }
